@@ -10,6 +10,8 @@
   }
   window.CacarolaSupabase?.track('product_view');
   document.title = 'Kit 10 Peças Colinox';
+  document.querySelector('#sup-btn')?.remove();
+  document.querySelector('#sup-panel')?.remove();
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const $all = (selector, root = document) => [...root.querySelectorAll(selector)];
 

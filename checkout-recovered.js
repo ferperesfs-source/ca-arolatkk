@@ -10,6 +10,8 @@
   }
   const api = window.CacarolaSupabase;
   api?.track('checkout_view');
+  document.querySelector('#sup-btn')?.remove();
+  document.querySelector('#sup-panel')?.remove();
   const money = (value) => value.toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL'
