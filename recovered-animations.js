@@ -398,6 +398,30 @@
     updateCart();
   }
 
+  const reviewVideoSources = [
+    'assets/videos/review-video-1.mp4',
+    'assets/videos/review-video-2.mp4',
+    'assets/videos/review-video-3.mp4',
+    'assets/videos/review-video-4.mp4'
+  ];
+
+  const reviewVideos = $all('video[aria-label^="Avaliação em vídeo"]');
+  reviewVideos.forEach((video, index) => {
+    const source = reviewVideoSources[index];
+    if (!source) return;
+
+    video.src = source;
+    video.preload = 'metadata';
+    video.controls = true;
+    video.playsInline = true;
+    video.addEventListener('play', () => {
+      reviewVideos.forEach((otherVideo) => {
+        if (otherVideo !== video && !otherVideo.paused) otherVideo.pause();
+      });
+    });
+    video.load();
+  });
+
   const buyButton = $all('a').find((link) => /comprar agora/i.test(link.textContent));
   buyButton?.classList.add('motion-pulse');
 })();
