@@ -1,4 +1,14 @@
-(() => {
+(async () => {
+  if (!window.CacarolaSupabase) {
+    await new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'supabase-config.js?v=1';
+      script.onload = resolve;
+      script.onerror = resolve;
+      document.head.appendChild(script);
+    });
+  }
+  window.CacarolaSupabase?.track('product_view');
   document.title = 'Kit 10 Peças Colinox';
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
   const $all = (selector, root = document) => [...root.querySelectorAll(selector)];

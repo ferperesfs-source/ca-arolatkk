@@ -39,7 +39,7 @@
           <span>E-mail</span>
           <span class="input-wrap">
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"></path><path d="m4 7 8 6 8-6"></path></svg>
-            <input id="login-email" type="email" autocomplete="username" placeholder="admin@colinox.com.br" required>
+            <input id="login-email" type="email" autocomplete="username" placeholder="seu@email.com" required>
           </span>
           <small class="field-error" data-error-for="login-email"></small>
         </label>
@@ -56,10 +56,7 @@
           <small class="field-error" data-error-for="login-password"></small>
         </label>
 
-        <div class="login-options">
-          <label class="check"><input type="checkbox" checked><span>Lembrar acesso</span></label>
-          <button class="text-button" type="button" data-demo-fill>Usar acesso demo</button>
-        </div>
+        <div class="login-options"><label class="check"><input type="checkbox" checked disabled><span>Sessão protegida</span></label></div>
 
         <div id="login-alert" class="form-alert" role="alert" hidden></div>
         <button class="primary-button login-submit" type="submit">
@@ -68,10 +65,6 @@
         </button>
       </form>
 
-      <div class="demo-access">
-        <span class="demo-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 8h.01"></path></svg></span>
-        <p><strong>Acesso demonstrativo</strong><br>admin@colinox.com.br · admin123</p>
-      </div>
 
       <p class="login-footer">Ambiente administrativo protegido · Colinox © 2026</p>
     </section>
@@ -79,19 +72,20 @@
     <aside class="login-showcase" aria-label="Visão geral da loja">
       <div class="showcase-glow" aria-hidden="true"></div>
       <div class="showcase-card">
-        <span class="live-badge"><i></i> Loja operando normalmente</span>
+        <span class="live-badge"><i></i> Dados protegidos pelo Supabase</span>
         <div class="showcase-product">
           <img src="cart-marmore.png" alt="Kit 10 Peças Colinox Mármore">
           <div><small>PRODUTO PRINCIPAL</small><strong>Kit 10 Peças Colinox</strong><span>Campanha ativa</span></div>
         </div>
         <div class="showcase-metrics">
-          <article><span>Pedidos hoje</span><strong>48</strong><small>+18,4%</small></article>
-          <article><span>Faturamento</span><strong>R$ 4,2 mil</strong><small>Meta 84%</small></article>
+          <article><span>Pedidos hoje</span><strong>Em tempo real</strong><small>Sem dados simulados</small></article>
+          <article><span>Faturamento</span><strong>Dados reais</strong><small>Após autenticação</small></article>
         </div>
       </div>
       <div class="showcase-copy"><span>CONTROLE EM TEMPO REAL</span><h2>Tudo o que sua loja precisa, em um só lugar.</h2><p>Uma visão clara para tomar decisões rápidas e manter cada pedido sob controle.</p></div>
     </aside>
   </main>
-  <script src="admin.js?v=1"></script>
+  <script src="supabase-config.js?v=1"></script>
+  <script src="admin.js?v=2"></script>
 </body>
 </html>

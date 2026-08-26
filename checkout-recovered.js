@@ -1,4 +1,15 @@
-(() => {
+(async () => {
+  if (!window.CacarolaSupabase) {
+    await new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'supabase-config.js?v=1';
+      script.onload = resolve;
+      script.onerror = resolve;
+      document.head.appendChild(script);
+    });
+  }
+  const api = window.CacarolaSupabase;
+  api?.track('checkout_view');
   const money = (value) => value.toLocaleString('pt-BR', {
     style: 'currency',
     currency: 'BRL'
@@ -111,6 +122,59 @@
       if (icon) icon.style.transform = expanded ? 'rotate(180deg)' : '';
     });
   }
+
+  const checkoutButton = [...document.querySelectorAll('.tt-btn')].find((button) => /ir para a entrega/i.test(button.textContent));
+  const fields = [...document.querySelectorAll('.tt-input')].slice(0, 4);
+  const productIds = { 'mármore': 'marmore', marmore: 'marmore', quartzo: 'quartzo', grafite: 'grafite', oliva: 'oliva' };
+  let formMessage;
+  const showFormMessage = (message, error = false) => {
+    if (!formMessage) {
+      formMessage = document.createElement('p');
+      formMessage.style.cssText = 'margin:0;font-size:12px;line-height:1.45;text-align:center;padding:10px;border-radius:10px';
+      checkoutButton?.before(formMessage);
+    }
+    formMessage.textContent = message;
+    formMessage.style.color = error ? '#b42342' : '#087a50';
+    formMessage.style.background = error ? '#fff0f3' : '#e8f8f0';
+  };
+
+  checkoutButton?.addEventListener('click', async (event) => {
+    event.preventDefault();
+    if (!api || fields.length < 4) return showFormMessage('A conexão segura não está disponível. Recarregue a página.', true);
+    const [email, phone, customerName, taxId] = fields.map((field) => field.value.trim());
+    const phoneDigits = phone.replace(/\D/g, '');
+    const taxDigits = taxId.replace(/\D/g, '');
+    if (!/^\S+@\S+\.\S+$/.test(email)) return showFormMessage('Informe um e-mail válido.', true);
+    if (phoneDigits.length < 10) return showFormMessage('Informe um telefone válido com DDD.', true);
+    if (customerName.split(/\s+/).length < 2) return showFormMessage('Informe seu nome completo.', true);
+    if (![11, 14].includes(taxDigits.length)) return showFormMessage('Informe um CPF ou CNPJ válido.', true);
+
+    checkoutButton.disabled = true;
+    checkoutButton.textContent = 'SALVANDO...';
+    try {
+      await api.track('checkout_started', { item_count: items.reduce((sum, item) => sum + item.qty, 0) });
+      await api.request('/rest/v1/orders', {
+        method: 'POST',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({
+          customer_name: customerName,
+          customer_email: email,
+          phone: phoneDigits,
+          customer_tax_id: taxDigits,
+          items: items.map((item) => ({
+            product_id: productIds[item.name.toLocaleLowerCase('pt-BR')] || item.name.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+            quantity: item.qty
+          }))
+        })
+      });
+      showFormMessage('Dados salvos com segurança. Pedido iniciado com sucesso.');
+      checkoutButton.textContent = 'PEDIDO INICIADO';
+    } catch (error) {
+      showFormMessage(error.message, true);
+      checkoutButton.disabled = false;
+      checkoutButton.textContent = 'IR PARA A ENTREGA';
+    }
+  });
 
   refreshTotals();
 })();

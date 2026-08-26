@@ -9,12 +9,17 @@ Projeto estático pronto para hospedagem na Vercel.
 - `/produto.html` ou `/loja` — página do produto
 - `/checkout.html` ou `/checkout` — checkout
 
-## Acesso demonstrativo
+## Dados e autenticação
 
-- E-mail: `admin@colinox.com.br`
-- Senha: `admin123`
+O projeto usa o Supabase `cacarola-prod` para autenticação administrativa, catálogo, pedidos e métricas de navegação. O painel não inclui registros simulados: quando ainda não existem pedidos, os indicadores começam em zero.
 
-> O login atual usa `sessionStorage` e serve apenas como demonstração local. Para produção com dados reais, conecte o painel a um backend com autenticação no servidor.
+- As sessões são emitidas pelo Supabase Auth.
+- O acesso ao painel exige vínculo na tabela `admin_users`.
+- Produtos ativos são públicos; pedidos e dados de clientes só podem ser lidos por administradores.
+- O checkout registra pedidos pendentes usando preços validados no banco.
+- O esquema reproduzível está em `supabase/schema.sql`.
+
+Credenciais, chaves secretas e tokens de gerenciamento não devem ser adicionados ao Git. A chave presente no cliente é apenas a chave publicável do projeto.
 
 ## Deploy na Vercel
 

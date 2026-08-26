@@ -2,5 +2,8 @@
 Thumbs.db
 .vercel
 node_modules
+.env
+.env.*
+!.env.example
 Kit 10 Peças Colinox*.html
 cart-modal-extracted.html
