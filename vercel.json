@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": false,
   "rewrites": [
+    { "source": "/api/primecash/:path*", "destination": "https://futysxjtptcsahgyrpci.supabase.co/functions/v1/primecash/:path*" },
     { "source": "/login", "destination": "/login.html" },
     { "source": "/admin", "destination": "/admin.html" },
     { "source": "/loja", "destination": "/produto.html" },

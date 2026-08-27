@@ -117,16 +117,27 @@ const handleCheckout = async (req: Request) => {
   if (req.method !== "POST") return json({ error: "Método não permitido." }, 405);
   const body = await parseJson(req) as any;
   const customer = body.customer || {};
+  const shipping = body.shipping || {};
   const name = String(customer.name || "").trim().slice(0, 120);
   const email = String(customer.email || "").trim().toLowerCase().slice(0, 180);
   const phone = String(customer.phone || "").replace(/\D/g, "").slice(0, 20);
   const taxId = String(customer.taxId || "").replace(/\D/g, "").slice(0, 14);
+  const postalCode = String(shipping.postalCode || "").replace(/\D/g, "").slice(0, 8);
+  const street = String(shipping.street || "").trim().slice(0, 140);
+  const streetNumber = String(shipping.number || "").trim().slice(0, 20);
+  const complement = String(shipping.complement || "").trim().slice(0, 80);
+  const neighborhood = String(shipping.neighborhood || "").trim().slice(0, 100);
+  const city = String(shipping.city || "").trim().slice(0, 100);
+  const state = String(shipping.state || "").trim().toUpperCase().slice(0, 2);
   const items = Array.isArray(body.items) ? body.items.slice(0, 8).map((item: any) => ({
     product_id: productId(item.productId),
     quantity: Math.max(0, Math.min(99, Number.parseInt(item.quantity, 10) || 0)),
   })) : [];
   if (name.split(/\s+/).length < 2 || !/^\S+@\S+\.\S+$/.test(email) || phone.length < 10 || ![11, 14].includes(taxId.length)) {
     return json({ error: "Revise os dados de identificação." }, 400);
+  }
+  if (postalCode.length !== 8 || !street || !streetNumber || !neighborhood || !city || state.length !== 2) {
+    return json({ error: "Revise o endereço de entrega." }, 400);
   }
   if (!items.length || items.some((item: any) => !item.product_id || item.quantity < 1)) return json({ error: "O carrinho contém itens inválidos." }, 400);
 
@@ -138,6 +149,8 @@ const handleCheckout = async (req: Request) => {
   const reference = crypto.randomUUID();
   const { data: order, error: orderError } = await supabase.from("orders").insert({
     customer_name: name, customer_email: email, phone, customer_tax_id: taxId, items,
+    shipping_address: [street, streetNumber, complement, neighborhood].filter(Boolean).join(", "),
+    city: `${city} - ${state}`, postal_code: postalCode,
     payment_reference: reference, gateway: "primecash", gateway_status: "creating",
   }).select("id,payment_reference,amount,items").single();
   if (orderError || !order) throw orderError || new Error("Não foi possível registrar o pedido.");

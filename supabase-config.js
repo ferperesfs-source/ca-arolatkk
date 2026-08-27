@@ -1,7 +1,10 @@
 (() => {
   const url = 'https://futysxjtptcsahgyrpci.supabase.co';
   const publishableKey = 'sb_publishable_5ZHATfufgFDbhiJnFBp4ig_xaxf-1Oq';
-  const primecashFunctionUrl = `${url}/functions/v1/primecash`;
+  const isLocalPreview = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  const primecashFunctionUrl = isLocalPreview
+    ? `${url}/functions/v1/primecash`
+    : '/api/primecash';
   const sessionKey = 'cacarolaAdminSession';
 
   const request = async (path, options = {}, accessToken = '') => {
@@ -73,15 +76,20 @@
   }).catch(() => null);
 
   const primecashRequest = async (path, options = {}, accessToken = '') => {
-    const response = await fetch(`${primecashFunctionUrl}${path}`, {
-      ...options,
-      headers: {
-        apikey: publishableKey,
-        'Content-Type': 'application/json',
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        ...(options.headers || {})
-      }
-    });
+    let response;
+    try {
+      response = await fetch(`${primecashFunctionUrl}${path}`, {
+        ...options,
+        headers: {
+          apikey: publishableKey,
+          'Content-Type': 'application/json',
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          ...(options.headers || {})
+        }
+      });
+    } catch {
+      throw new Error('Não foi possível conectar ao pagamento. Verifique sua internet e tente novamente.');
+    }
     const text = await response.text();
     const data = text ? JSON.parse(text) : null;
     if (!response.ok) throw new Error(data?.error || 'Não foi possível concluir a operação.');
