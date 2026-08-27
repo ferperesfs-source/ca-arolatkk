@@ -2,7 +2,7 @@
   if (!window.CacarolaSupabase) {
     await new Promise((resolve) => {
       const script = document.createElement('script');
-      script.src = 'supabase-config.js?v=2';
+      script.src = 'supabase-config.js?v=4';
       script.onload = resolve;
       script.onerror = resolve;
       document.head.appendChild(script);

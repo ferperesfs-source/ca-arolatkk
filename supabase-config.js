@@ -4,7 +4,7 @@
   const isLocalPreview = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
   const primecashFunctionUrl = isLocalPreview
     ? `${url}/functions/v1/primecash`
-    : '/pagamento';
+    : '/api/order-session';
   const sessionKey = 'cacarolaAdminSession';
 
   const request = async (path, options = {}, accessToken = '') => {
