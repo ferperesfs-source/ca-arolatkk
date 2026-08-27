@@ -142,7 +142,7 @@
 
   checkoutButton?.addEventListener('click', async (event) => {
     event.preventDefault();
-    if (!api || fields.length < 4) return showFormMessage('A conexão segura não está disponível. Recarregue a página.', true);
+    if (fields.length < 4) return showFormMessage('A conexão segura não está disponível. Recarregue a página.', true);
     const [email, phone, customerName, taxId] = fields.map((field) => field.value.trim());
     const phoneDigits = phone.replace(/\D/g, '');
     const taxDigits = taxId.replace(/\D/g, '');
@@ -152,25 +152,25 @@
     if (![11, 14].includes(taxDigits.length)) return showFormMessage('Informe um CPF ou CNPJ válido.', true);
 
     checkoutButton.disabled = true;
-    checkoutButton.textContent = 'SALVANDO...';
+    checkoutButton.textContent = 'ABRINDO PAGAMENTO...';
     try {
-      await api.track('checkout_started', { item_count: items.reduce((sum, item) => sum + item.qty, 0) });
-      await api.request('/rest/v1/orders', {
+      await api?.track('checkout_started', { item_count: items.reduce((sum, item) => sum + item.qty, 0) });
+      const response = await fetch('/api/primecash-checkout', {
         method: 'POST',
-        headers: { Prefer: 'return=minimal' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customer_name: customerName,
-          customer_email: email,
-          phone: phoneDigits,
-          customer_tax_id: taxDigits,
+          customer: { name: customerName, email, phone: phoneDigits, taxId: taxDigits },
           items: items.map((item) => ({
-            product_id: productIds[item.name.toLocaleLowerCase('pt-BR')] || item.name.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+            productId: productIds[item.name.toLocaleLowerCase('pt-BR')] || item.name.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
             quantity: item.qty
           }))
         })
       });
-      showFormMessage('Dados salvos com segurança. Pedido iniciado com sucesso.');
-      checkoutButton.textContent = 'PEDIDO INICIADO';
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.secureUrl) throw new Error(data.error || 'Não foi possível abrir o pagamento.');
+      showFormMessage('Pedido criado. Redirecionando para o pagamento seguro...');
+      checkoutButton.textContent = 'REDIRECIONANDO...';
+      location.assign(data.secureUrl);
     } catch (error) {
       showFormMessage(error.message, true);
       checkoutButton.disabled = false;

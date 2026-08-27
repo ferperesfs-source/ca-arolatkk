@@ -83,7 +83,8 @@
     '#visao-geral': { view: 'overview', title: 'Visão geral', search: 'Buscar pedido, cliente...' },
     '#pedidos': { view: 'orders', title: 'Pedidos', search: 'Buscar pedido ou cliente...' },
     '#produtos': { view: 'products', title: 'Produtos', search: 'Buscar produto...' },
-    '#clientes': { view: 'customers', title: 'Clientes', search: 'Buscar cliente...' }
+    '#clientes': { view: 'customers', title: 'Clientes', search: 'Buscar cliente...' },
+    '#gateways': { view: 'gateways', title: 'Gateways', search: 'Gateways de pagamento' }
   };
 
   const currentRoute = () => routeConfig[location.hash] || routeConfig['#visao-geral'];
@@ -256,16 +257,48 @@
     showToast('Relatório de clientes exportado.');
   };
 
+  const renderGateway = (settings = {}, health = {}) => {
+    const active = Boolean(settings.active);
+    const configured = Boolean(health.configured);
+    const state = document.querySelector('[data-gateway-state]');
+    const toggle = document.querySelector('[data-gateway-toggle]');
+    const notice = document.querySelector('[data-gateway-notice]');
+    const healthy = active && configured;
+    if (toggle) { toggle.checked = active; toggle.disabled = false; }
+    if (state) {
+      state.className = `gateway-state ${healthy ? 'is-active' : active ? 'is-error' : 'is-inactive'}`;
+      state.innerHTML = `<i></i> ${healthy ? 'Ativo' : active ? 'Requer configuração' : 'Inativo'}`;
+    }
+    document.querySelector('[data-gateway-health]').textContent = healthy ? 'Operacional' : active ? 'Configuração pendente' : 'Desativado';
+    document.querySelector('[data-gateway-credentials]').textContent = configured ? 'Configuradas na Vercel' : 'Não configuradas';
+    notice.className = `gateway-notice ${healthy ? 'is-success' : active ? 'is-error' : ''}`;
+    notice.textContent = healthy
+      ? 'PrimeCash está ativa. O checkout já pode criar pagamentos reais.'
+      : active
+        ? 'Adicione as duas variáveis secretas na Vercel para liberar o checkout.'
+        : 'Ative este gateway para usá-lo nas novas compras.';
+  };
+
+  const loadGatewayHealth = async (session) => {
+    try {
+      const response = await fetch('/api/primecash-status', { headers: { Authorization: `Bearer ${session.access_token}` } });
+      const data = await response.json();
+      return response.ok ? data : { configured: false };
+    } catch { return { configured: false }; }
+  };
+
   const boot = async () => {
     const session = await api.validSession();
     if (!session) return location.replace('login.html');
     try {
       const membership = await api.request(`/rest/v1/admin_users?user_id=eq.${encodeURIComponent(session.user.id)}&select=display_name,email`, {}, session.access_token);
       if (!membership?.length) throw new Error('Acesso administrativo não autorizado.');
-      const [orders, products, events] = await Promise.all([
+      const [orders, products, events, gatewayRows, gatewayHealth] = await Promise.all([
         api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
         api.request('/rest/v1/products?select=id,title,variant_name,price,image_url,stock_quantity,active&active=eq.true&order=sort_order.asc', {}, session.access_token),
-        api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token)
+        api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token),
+        api.request('/rest/v1/gateway_settings?provider=eq.primecash&select=provider,active,updated_at', {}, session.access_token),
+        loadGatewayHealth(session)
       ]);
       const displayName = membership[0].display_name || 'Administrador';
       document.querySelector('.admin-user strong').textContent = displayName;
@@ -275,6 +308,7 @@
       document.querySelector('[data-view="overview"] .eyebrow').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date()).toLocaleUpperCase('pt-BR');
       cachedOrders = orders;
       renderOrders(orders); renderProducts(products); renderCustomers(orders); renderActivity(orders); renderMetrics(orders, events);
+      renderGateway(gatewayRows[0] || { active: true }, gatewayHealth);
     } catch (error) {
       showToast(error.message);
       if (error.message.includes('autorizado')) { api.saveSession(null); setTimeout(() => location.replace('login.html'), 1200); }
@@ -299,6 +333,38 @@
   document.querySelector('#product-search')?.addEventListener('input', filterProducts);
   document.querySelector('#customer-search')?.addEventListener('input', filterCustomers);
   document.querySelector('[data-export-customers]')?.addEventListener('click', exportCustomers);
+  document.querySelector('[data-gateway-toggle]')?.addEventListener('change', async (event) => {
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    const active = event.target.checked;
+    event.target.disabled = true;
+    try {
+      await api.request('/rest/v1/gateway_settings?provider=eq.primecash', {
+        method: 'PATCH',
+        headers: { Prefer: 'return=minimal' },
+        body: JSON.stringify({ active, updated_at: new Date().toISOString() })
+      }, session.access_token);
+      const health = await loadGatewayHealth(session);
+      renderGateway({ active }, health);
+      showToast(active ? 'PrimeCash definida como gateway do checkout.' : 'PrimeCash desativada no checkout.');
+    } catch (error) {
+      event.target.checked = !active;
+      event.target.disabled = false;
+      showToast(error.message);
+    }
+  });
+  document.querySelector('[data-test-gateway]')?.addEventListener('click', async (event) => {
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = 'Testando...';
+    const health = await loadGatewayHealth(session);
+    const rows = await api.request('/rest/v1/gateway_settings?provider=eq.primecash&select=active', {}, session.access_token).catch(() => []);
+    renderGateway(rows[0] || { active: false }, health);
+    showToast(health.configured ? 'Credenciais seguras encontradas.' : 'Credenciais ainda não configuradas na Vercel.');
+    event.currentTarget.disabled = false;
+    event.currentTarget.textContent = 'Testar conexão';
+  });
   document.querySelector('.global-search input')?.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     const route = currentRoute().view;

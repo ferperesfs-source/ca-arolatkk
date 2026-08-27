@@ -33,6 +33,18 @@ create table if not exists public.orders (
   shipping_address text,
   city text,
   postal_code text,
+  payment_reference uuid unique,
+  gateway text check (gateway is null or gateway in ('primecash')),
+  gateway_checkout_id text,
+  gateway_status text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.gateway_settings (
+  provider text primary key check (provider in ('primecash')),
+  display_name text not null,
+  active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -113,6 +125,7 @@ alter table public.admin_users enable row level security;
 alter table public.products enable row level security;
 alter table public.orders enable row level security;
 alter table public.tracking_events enable row level security;
+alter table public.gateway_settings enable row level security;
 
 create policy "admins can read own membership" on public.admin_users
 for select to authenticated using (user_id = (select auth.uid()));
@@ -144,12 +157,19 @@ for insert to anon, authenticated with check (event_name in ('product_view','car
 create policy "admins read events" on public.tracking_events
 for select to authenticated using (exists (select 1 from public.admin_users au where au.user_id = (select auth.uid())));
 
-revoke all on public.admin_users, public.products, public.orders, public.tracking_events from anon, authenticated;
+create policy "admins read gateway settings" on public.gateway_settings
+for select to authenticated using (exists (select 1 from public.admin_users au where au.user_id = (select auth.uid())));
+create policy "admins update gateway settings" on public.gateway_settings
+for update to authenticated using (exists (select 1 from public.admin_users au where au.user_id = (select auth.uid())))
+with check (exists (select 1 from public.admin_users au where au.user_id = (select auth.uid())));
+
+revoke all on public.admin_users, public.products, public.orders, public.tracking_events, public.gateway_settings from anon, authenticated;
 grant select on public.products to anon, authenticated;
 grant insert on public.orders, public.tracking_events to anon, authenticated;
 grant select on public.admin_users, public.orders, public.tracking_events to authenticated;
 grant insert, update, delete on public.products to authenticated;
 grant update on public.orders to authenticated;
+grant select, update on public.gateway_settings to authenticated;
 grant usage, select on all sequences in schema public to anon, authenticated;
 
 insert into public.products (id,title,variant_name,price,currency,image_url,stock_quantity,active,sort_order)
@@ -167,3 +187,7 @@ on conflict (id) do update set
   active = excluded.active,
   sort_order = excluded.sort_order,
   updated_at = now();
+
+insert into public.gateway_settings (provider, display_name, active)
+values ('primecash', 'PrimeCash Brasil', true)
+on conflict (provider) do nothing;
