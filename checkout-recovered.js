@@ -212,6 +212,31 @@
       const digits = value.replace(/\D/g, '').slice(0, 8);
       return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits;
     };
+    const lookupPostalCodeWithScript = (postalCode, signal) => new Promise((resolve, reject) => {
+      const callback = `__postalCodeLookup${Date.now()}${Math.random().toString(36).slice(2)}`;
+      const script = document.createElement('script');
+      const cleanup = () => {
+        script.remove();
+        delete window[callback];
+        signal.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException('Consulta cancelada.', 'AbortError'));
+      };
+      window[callback] = (address) => {
+        cleanup();
+        resolve(address);
+      };
+      script.async = true;
+      script.src = `/buscar-endereco?cep=${postalCode}&callback=${encodeURIComponent(callback)}`;
+      script.onerror = () => {
+        cleanup();
+        reject(new Error('script-lookup-failed'));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      document.head.append(script);
+    });
     const fillAddressFromPostalCode = async () => {
       const postalCode = postalCodeInput?.value.replace(/\D/g, '') || '';
       if (postalCode.length !== 8 || postalCode === lastResolvedPostalCode) return;
@@ -226,16 +251,26 @@
       postalCodeInput.setAttribute('aria-busy', 'true');
       setPostalCodeHelp('Buscando endereço...');
       try {
-        const response = await fetch(`/buscar-endereco?cep=${postalCode}`, {
-          headers: { Accept: 'application/json' }, signal: controller.signal
-        });
-        if (response.status === 404) {
+        let address;
+        try {
+          const response = await fetch(`/buscar-endereco?cep=${postalCode}`, {
+            headers: { Accept: 'application/json' }, signal: controller.signal
+          });
+          if (response.status === 404) address = { error: 'not_found' };
+          else {
+            if (!response.ok) throw new Error('lookup-failed');
+            address = await response.json();
+          }
+        } catch (lookupError) {
+          if (controller.signal.aborted) throw lookupError;
+          address = await lookupPostalCodeWithScript(postalCode, controller.signal);
+        }
+        if (address.error === 'not_found') {
           lastResolvedPostalCode = postalCode;
           setPostalCodeHelp('CEP não encontrado. Confira o número ou preencha o endereço manualmente.', 'error');
           return;
         }
-        if (!response.ok) throw new Error('lookup-failed');
-        const address = await response.json();
+        if (address.error) throw new Error(address.error);
         const values = {
           street: address.street,
           neighborhood: address.neighborhood,

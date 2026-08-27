@@ -1,11 +1,21 @@
 export default async function handler(request, response) {
+  const callback = typeof request.query?.callback === 'string' && /^[A-Za-z_$][\w$]{0,64}$/.test(request.query.callback)
+    ? request.query.callback
+    : '';
+  const send = (status, payload) => {
+    if (!callback) return response.status(status).json(payload);
+    const safePayload = JSON.stringify(payload).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+    response.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+    return response.status(200).send(`${callback}(${safePayload});`);
+  };
+
   if (request.method !== 'GET') {
     response.setHeader('Allow', 'GET');
-    return response.status(405).json({ error: 'Método não permitido.' });
+    return send(405, { error: 'method_not_allowed' });
   }
 
   const postalCode = String(request.query?.cep || '').replace(/\D/g, '');
-  if (postalCode.length !== 8) return response.status(400).json({ error: 'CEP inválido.' });
+  if (postalCode.length !== 8) return send(400, { error: 'invalid_postal_code' });
 
   try {
     const lookup = await fetch(`https://viacep.com.br/ws/${postalCode}/json/`, {
@@ -15,10 +25,10 @@ export default async function handler(request, response) {
     if (!lookup.ok) throw new Error(`ViaCEP respondeu ${lookup.status}`);
 
     const address = await lookup.json();
-    if (address.erro) return response.status(404).json({ error: 'CEP não encontrado.' });
+    if (address.erro) return send(404, { error: 'not_found' });
 
     response.setHeader('Cache-Control', 'public, s-maxage=86400, stale-while-revalidate=604800');
-    return response.status(200).json({
+    return send(200, {
       postalCode: address.cep,
       street: address.logradouro || '',
       neighborhood: address.bairro || '',
@@ -27,6 +37,6 @@ export default async function handler(request, response) {
     });
   } catch (error) {
     console.error('CEP lookup failed', { postalCode, message: error.message });
-    return response.status(502).json({ error: 'Não foi possível consultar o CEP agora.' });
+    return send(502, { error: 'lookup_unavailable' });
   }
 }
