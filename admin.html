@@ -18,7 +18,7 @@
 @media (max-width:430px){.metric-grid{grid-template-columns:1fr 1fr}.metric-card{min-width:0}.metric-icon{width:34px;height:34px}.metric-head{align-items:flex-start}.metric-head .trend{position:absolute;top:14px;right:12px}.metric-card>small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar-chart{height:210px;padding-inline:8px}.bar-chart i{width:70%}.showcase-metrics{grid-template-columns:1fr}.login-copy h1{font-size:34px}.demo-access{align-items:flex-start}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.bar-chart i{transition:none}}
 </style>
-  <link rel="stylesheet" href="admin.css?v=6">
+  <link rel="stylesheet" href="admin.css?v=7">
 </head>
 <body class="admin-page" data-page="admin">
   <div class="admin-layout">
@@ -33,6 +33,7 @@
         <a class="nav-item" href="#produtos" data-route="products"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"></path><path d="m3 12 9 5 9-5"></path><path d="m3 16 9 5 9-5"></path></svg><span>Produtos</span></a>
         <a class="nav-item" href="#clientes" data-route="customers"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 1-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg><span>Clientes</span></a>
         <a class="nav-item" href="#gateways" data-route="gateways"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M3 10h18M7 15h3"></path></svg><span>Gateways</span></a>
+        <a class="nav-item" href="#rastreamento" data-route="tracking"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-8M22 19H2"></path><circle cx="16" cy="7" r="3"></circle></svg><span>Rastreamento</span></a>
       </nav>
       <div class="sidebar-bottom">
         <a class="nav-item" href="produto.html"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M9 22V12h6v10"></path></svg><span>Ver loja</span></a>
@@ -179,11 +180,38 @@
             </section>
           </article>
         </section>
+
+        <section class="admin-view" data-view="tracking" aria-labelledby="tracking-heading" hidden>
+          <header class="page-heading"><div><p class="eyebrow">MARKETING</p><h2 id="tracking-heading">Rastreamento</h2><p>Conecte seus destinos de conversão. Apenas compras com pagamento confirmado são enviadas.</p></div></header>
+          <section class="tracking-summary" aria-label="Resumo do rastreamento">
+            <article><span>Integrações ativas</span><strong data-tracking-active>0</strong><small>Google, Meta e TikTok</small></article>
+            <article><span>Compras enviadas</span><strong data-tracking-delivered>0</strong><small>Entregas confirmadas pelas APIs</small></article>
+            <article><span>Falhas de entrega</span><strong data-tracking-failed>0</strong><small>Podem ser corrigidas sem duplicar eventos</small></article>
+          </section>
+          <div class="tracking-layout">
+            <article class="panel tracking-form-card">
+              <div class="tracking-card-heading"><span class="metric-icon pink"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"></path></svg></span><div><h3>Nova integração</h3><p>Você pode cadastrar mais de uma por plataforma.</p></div></div>
+              <form class="tracking-form" data-tracking-form novalidate>
+                <label><span>Plataforma</span><select name="provider" data-tracking-provider><option value="google">Google Analytics</option><option value="meta">Meta Pixel</option><option value="tiktok">TikTok Pixel</option></select></label>
+                <label><span>Nome da integração</span><input name="name" type="text" minlength="2" maxlength="80" autocomplete="off" placeholder="Ex.: Google principal" required></label>
+                <label><span data-tracking-id-label>ID de medição</span><input name="trackingId" type="text" maxlength="200" autocomplete="off" spellcheck="false" placeholder="G-XXXXXXXXXX" required><small data-tracking-id-help>Encontrado nos detalhes do fluxo da Web.</small></label>
+                <label><span data-tracking-secret-label>API Secret</span><input name="secret" type="password" minlength="8" maxlength="1000" autocomplete="new-password" spellcheck="false" placeholder="Cole a credencial privada" required><small>A credencial vai direto para o Supabase Vault e não será exibida novamente.</small></label>
+                <label class="tracking-active"><input name="active" type="checkbox" checked><span aria-hidden="true"></span><b>Ativar após salvar</b></label>
+                <p class="tracking-form-error" data-tracking-form-error role="alert"></p>
+                <button class="primary-button" type="submit"><span>Adicionar integração</span></button>
+              </form>
+            </article>
+            <section class="panel tracking-list-card" aria-labelledby="tracking-list-heading">
+              <header class="panel-header"><div><h3 id="tracking-list-heading">Integrações configuradas</h3><p>O evento Purchase é enviado somente após a confirmação do pagamento.</p></div></header>
+              <div class="tracking-list" data-tracking-list><p class="empty-state">Carregando integrações...</p></div>
+            </section>
+          </div>
+        </section>
       </main>
     </div>
   </div>
   <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="supabase-config.js?v=6"></script>
-  <script src="admin.js?v=8"></script>
+  <script src="admin.js?v=9"></script>
 </body>
 </html>

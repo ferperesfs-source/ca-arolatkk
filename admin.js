@@ -81,6 +81,7 @@
   let selectedGateway = 'primecash';
   let gatewaySettings = {};
   let gatewayHealth = {};
+  let trackingIntegrations = [];
   const gatewayCatalog = {
     primecash: {
       name: 'PrimeCash Brasil', shortName: 'PrimeCash', logo: 'assets/gateways/primecash-logo.png',
@@ -101,7 +102,8 @@
     '#pedidos': { view: 'orders', title: 'Pedidos', search: 'Buscar pedido ou cliente...' },
     '#produtos': { view: 'products', title: 'Produtos', search: 'Buscar produto...' },
     '#clientes': { view: 'customers', title: 'Clientes', search: 'Buscar cliente...' },
-    '#gateways': { view: 'gateways', title: 'Gateways', search: 'Gateways de pagamento' }
+    '#gateways': { view: 'gateways', title: 'Gateways', search: 'Gateways de pagamento' },
+    '#rastreamento': { view: 'tracking', title: 'Rastreamento', search: 'Integrações de marketing' }
   };
 
   const currentRoute = () => routeConfig[location.hash] || routeConfig['#visao-geral'];
@@ -329,19 +331,60 @@
     } catch { return { configured: false }; }
   };
 
+  const trackingCatalog = {
+    google: { name: 'Google Analytics', mark: 'G', idLabel: 'ID de medição', idPlaceholder: 'G-XXXXXXXXXX', idHelp: 'Admin → Fluxos de dados → Web → ID de medição.', secretLabel: 'API Secret' },
+    meta: { name: 'Meta Pixel', mark: 'M', idLabel: 'Pixel ID', idPlaceholder: '123456789012345', idHelp: 'Gerenciador de Eventos → Fonte de dados → Identificação.', secretLabel: 'Access Token da API de Conversões' },
+    tiktok: { name: 'TikTok Pixel', mark: 'T', idLabel: 'Pixel Code', idPlaceholder: 'CXXXXXXXXXXXXXXXXX', idHelp: 'Events Manager → Web Events → Pixel → Settings.', secretLabel: 'Access Token da Events API' }
+  };
+
+  const loadTracking = async (session) => {
+    const response = await api.primecashRequest('/tracking', {}, session.access_token);
+    trackingIntegrations = response.integrations || [];
+    renderTracking();
+  };
+
+  const renderTracking = () => {
+    const list = document.querySelector('[data-tracking-list]');
+    if (!list) return;
+    const delivered = trackingIntegrations.reduce((sum, item) => sum + Number(item.deliveries?.delivered || 0), 0);
+    const failed = trackingIntegrations.reduce((sum, item) => sum + Number(item.deliveries?.failed || 0), 0);
+    document.querySelector('[data-tracking-active]').textContent = String(trackingIntegrations.filter((item) => item.active && item.configured).length);
+    document.querySelector('[data-tracking-delivered]').textContent = String(delivered);
+    document.querySelector('[data-tracking-failed]').textContent = String(failed);
+    list.innerHTML = trackingIntegrations.length ? trackingIntegrations.map((item) => {
+      const meta = trackingCatalog[item.provider] || trackingCatalog.google;
+      const active = Boolean(item.active && item.configured);
+      const deliveryCopy = `${item.deliveries?.delivered || 0} enviada${item.deliveries?.delivered === 1 ? '' : 's'}${item.deliveries?.failed ? ` · ${item.deliveries.failed} com falha` : ''}`;
+      return `<article class="tracking-item" data-tracking-id="${escapeHtml(item.id)}"><span class="tracking-provider-mark ${escapeHtml(item.provider)}" aria-hidden="true">${meta.mark}</span><div class="tracking-item-main"><span class="tracking-item-title"><strong>${escapeHtml(item.name)}</strong><i class="${active ? '' : 'is-inactive'}">${active ? 'Ativa' : item.configured ? 'Pausada' : 'Sem credencial'}</i></span><code>${escapeHtml(item.tracking_id)}</code><small>${escapeHtml(meta.name)} · ${escapeHtml(deliveryCopy)}</small></div><div class="tracking-item-actions"><button type="button" data-tracking-toggle>${item.active ? 'Pausar' : 'Ativar'}</button><button class="tracking-delete" type="button" data-tracking-delete aria-label="Remover ${escapeHtml(item.name)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6"></path></svg></button></div></article>`;
+    }).join('') : '<p class="empty-state">Nenhuma integração cadastrada. Adicione seu primeiro destino ao lado.</p>';
+  };
+
+  const updateTrackingFields = () => {
+    const form = document.querySelector('[data-tracking-form]');
+    if (!form) return;
+    const meta = trackingCatalog[form.elements.provider.value];
+    document.querySelector('[data-tracking-id-label]').textContent = meta.idLabel;
+    document.querySelector('[data-tracking-id-help]').textContent = meta.idHelp;
+    document.querySelector('[data-tracking-secret-label]').textContent = meta.secretLabel;
+    form.elements.trackingId.placeholder = meta.idPlaceholder;
+    form.elements.secret.placeholder = `Cole o ${meta.secretLabel}`;
+    if (!form.elements.name.value.trim()) form.elements.name.placeholder = `Ex.: ${meta.name} principal`;
+  };
+
   const boot = async () => {
     const session = await api.validSession();
     if (!session) return location.replace('login.html');
     try {
       const membership = await api.request(`/rest/v1/admin_users?user_id=eq.${encodeURIComponent(session.user.id)}&select=display_name,email`, {}, session.access_token);
       if (!membership?.length) throw new Error('Acesso administrativo não autorizado.');
-      const [orders, products, events, gatewayRows, primecashHealth, titansHealth] = await Promise.all([
+      const [orders, products, events, gatewayRows, primecashHealth, titansHealth, trackingResponse] = await Promise.all([
         api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
         api.request('/rest/v1/products?select=id,title,variant_name,price,image_url,stock_quantity,active&active=eq.true&order=sort_order.asc', {}, session.access_token),
         api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token),
         api.request('/rest/v1/gateway_settings?select=provider,active,updated_at&order=provider.asc', {}, session.access_token),
         loadGatewayHealth(session, 'primecash'),
-        loadGatewayHealth(session, 'titans')
+        loadGatewayHealth(session, 'titans'),
+        api.primecashRequest('/tracking', {}, session.access_token).catch(() => ({ integrations: [] }))
       ]);
       const displayName = membership[0].display_name || 'Administrador';
       document.querySelector('.admin-user strong').textContent = displayName;
@@ -355,6 +398,8 @@
       gatewayHealth = { primecash: primecashHealth, titans: titansHealth };
       selectedGateway = gatewayRows.find((row) => row.active)?.provider || 'primecash';
       renderGateway();
+      trackingIntegrations = trackingResponse.integrations || [];
+      renderTracking();
     } catch (error) {
       showToast(error.message);
       if (error.message.includes('autorizado')) { api.saveSession(null); setTimeout(() => location.replace('login.html'), 1200); }
@@ -469,6 +514,79 @@
       submit.querySelector('span').textContent = 'Salvar chave';
     }
   });
+  document.querySelector('[data-tracking-provider]')?.addEventListener('change', updateTrackingFields);
+  document.querySelector('[data-tracking-form]')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    const error = document.querySelector('[data-tracking-form-error]');
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    error.textContent = '';
+    form.querySelectorAll('[aria-invalid="true"]').forEach((input) => input.removeAttribute('aria-invalid'));
+    const payload = {
+      provider: form.elements.provider.value,
+      name: form.elements.name.value.trim(),
+      trackingId: form.elements.trackingId.value.trim(),
+      secret: form.elements.secret.value.trim(),
+      active: form.elements.active.checked
+    };
+    const missing = ['name', 'trackingId', 'secret'].find((field) => !payload[field]);
+    if (missing) {
+      const input = form.elements[missing];
+      input.setAttribute('aria-invalid', 'true');
+      error.textContent = 'Preencha todos os campos obrigatórios.';
+      return input.focus();
+    }
+    submit.disabled = true;
+    submit.querySelector('span').textContent = 'Salvando com segurança...';
+    try {
+      const response = await api.primecashRequest('/tracking', { method: 'POST', body: JSON.stringify(payload) }, session.access_token);
+      trackingIntegrations = response.integrations || [];
+      renderTracking();
+      form.reset();
+      form.elements.active.checked = true;
+      updateTrackingFields();
+      showToast('Integração adicionada. Somente pedidos pagos serão enviados.');
+    } catch (saveError) {
+      error.textContent = saveError.message;
+    } finally {
+      submit.disabled = false;
+      submit.querySelector('span').textContent = 'Adicionar integração';
+    }
+  });
+  document.querySelector('[data-tracking-list]')?.addEventListener('click', async (event) => {
+    const card = event.target.closest('[data-tracking-id]');
+    const integration = trackingIntegrations.find((item) => item.id === card?.dataset.trackingId);
+    if (!integration) return;
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.matches('[data-tracking-delete]')) {
+      if (!confirm(`Remover a integração “${integration.name}”? Os pedidos futuros deixarão de ser enviados para ela.`)) return;
+      button.disabled = true;
+      try {
+        await api.primecashRequest(`/tracking?id=${encodeURIComponent(integration.id)}`, { method: 'DELETE' }, session.access_token);
+        trackingIntegrations = trackingIntegrations.filter((item) => item.id !== integration.id);
+        renderTracking();
+        showToast('Integração removida.');
+      } catch (deleteError) { button.disabled = false; showToast(deleteError.message); }
+      return;
+    }
+    if (button.matches('[data-tracking-toggle]')) {
+      button.disabled = true;
+      try {
+        const response = await api.primecashRequest('/tracking', { method: 'PUT', body: JSON.stringify({
+          id: integration.id, provider: integration.provider, name: integration.name,
+          trackingId: integration.tracking_id, active: !integration.active
+        }) }, session.access_token);
+        trackingIntegrations = response.integrations || [];
+        renderTracking();
+        showToast(integration.active ? 'Integração pausada.' : 'Integração ativada.');
+      } catch (toggleError) { button.disabled = false; showToast(toggleError.message); }
+    }
+  });
   document.querySelector('.global-search input')?.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     const route = currentRoute().view;
@@ -485,5 +603,6 @@
   document.querySelector('[data-more-orders]')?.addEventListener('click', () => { renderOrders(cachedOrders); filterOrders(); showToast('Lista de pedidos atualizada.'); });
   if (!location.hash || !routeConfig[location.hash]) history.replaceState(null, '', '#visao-geral');
   showRoute();
+  updateTrackingFields();
   boot();
 })();

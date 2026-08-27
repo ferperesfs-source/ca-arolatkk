@@ -7,10 +7,12 @@ const PRIMECASH_URL = "https://api.primecashbrasil.com/v1";
 const TITANS_URL = "https://api.titansgateway.net";
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/primecash`;
 type Provider = "primecash" | "titans";
+type MarketingProvider = "google" | "meta" | "tiktok";
+type MarketingIntegration = { id: string; provider: MarketingProvider; name: string; tracking_id: string; active: boolean };
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
-  "Access-Control-Allow-Methods": "GET, PUT, POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, PUT, POST, DELETE, OPTIONS",
 };
 
 const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
@@ -147,6 +149,163 @@ const verifyTitansSignature = async (rawBody: string, signature: string) => {
   const digest = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody)));
   const expected = btoa(String.fromCharCode(...digest));
   return timingSafeEqual(expected, signature.trim());
+};
+
+const marketingRules: Record<MarketingProvider, { id: RegExp; idLabel: string; secretLabel: string }> = {
+  google: { id: /^G-[A-Z0-9]{5,20}$/i, idLabel: "ID de medição", secretLabel: "API Secret" },
+  meta: { id: /^\d{5,30}$/, idLabel: "Pixel ID", secretLabel: "Access Token" },
+  tiktok: { id: /^[A-Z0-9_-]{5,80}$/i, idLabel: "Pixel Code", secretLabel: "Access Token" },
+};
+
+const readMarketingIntegrations = async () => {
+  const { data, error } = await supabase.from("marketing_integrations")
+    .select("id,provider,name,tracking_id,active,created_at,updated_at").order("created_at", { ascending: true });
+  if (error) throw error;
+  const { data: deliveries, error: deliveryError } = await supabase.from("marketing_deliveries").select("integration_id,status");
+  if (deliveryError) throw deliveryError;
+  const stats = new Map<string, { delivered: number; failed: number }>();
+  for (const row of deliveries || []) {
+    const current = stats.get(row.integration_id) || { delivered: 0, failed: 0 };
+    if (row.status === "delivered") current.delivered += 1;
+    if (row.status === "failed") current.failed += 1;
+    stats.set(row.integration_id, current);
+  }
+  return await Promise.all((data || []).map(async (integration) => {
+    const { data: secret, error: secretError } = await supabase.rpc("get_marketing_secret", { p_integration_id: integration.id });
+    if (secretError) throw secretError;
+    return { ...integration, configured: Boolean(secret), deliveries: stats.get(integration.id) || { delivered: 0, failed: 0 } };
+  }));
+};
+
+const handleTracking = async (req: Request, url: URL) => {
+  await requireAdmin(req);
+  if (req.method === "GET") return json({ integrations: await readMarketingIntegrations() });
+  if (req.method === "DELETE") {
+    const id = url.searchParams.get("id") || "";
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Integração inválida." }, 400);
+    const { error: secretError } = await supabase.rpc("delete_marketing_secret", { p_integration_id: id });
+    if (secretError) throw secretError;
+    const { error } = await supabase.from("marketing_integrations").delete().eq("id", id);
+    if (error) throw error;
+    return json({ deleted: true });
+  }
+  if (!["POST", "PUT"].includes(req.method)) return json({ error: "Método não permitido." }, 405);
+  const body = await parseJson(req) as Record<string, unknown>;
+  const id = String(body.id || "");
+  const provider = String(body.provider || "") as MarketingProvider;
+  const name = String(body.name || "").trim().slice(0, 80);
+  const trackingId = String(body.trackingId || "").trim().slice(0, 200);
+  const secret = String(body.secret || "").trim();
+  const active = body.active !== false;
+  if (!marketingRules[provider]) return json({ error: "Selecione uma plataforma válida." }, 400);
+  if (name.length < 2) return json({ error: "Informe um nome para identificar a integração." }, 400);
+  if (!marketingRules[provider].id.test(trackingId)) return json({ error: `${marketingRules[provider].idLabel} inválido.` }, 400);
+  if (secret && (secret.length < 8 || secret.length > 1000)) return json({ error: `${marketingRules[provider].secretLabel} inválido.` }, 400);
+  if (req.method === "POST" && !secret) return json({ error: `Informe o ${marketingRules[provider].secretLabel}.` }, 400);
+  const values = { provider, name, tracking_id: trackingId, active, updated_at: new Date().toISOString() };
+  const query = req.method === "PUT"
+    ? supabase.from("marketing_integrations").update(values).eq("id", id).select("id").single()
+    : supabase.from("marketing_integrations").insert(values).select("id").single();
+  const { data: integration, error } = await query;
+  if (error || !integration) throw error || new Error("Não foi possível salvar a integração.");
+  if (secret) {
+    const { error: secretError } = await supabase.rpc("set_marketing_secret", { p_integration_id: integration.id, p_secret: secret });
+    if (secretError) throw secretError;
+  }
+  return json({ saved: true, integrations: await readMarketingIntegrations() });
+};
+
+const sha256 = async (value: unknown) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(normalized)));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+const deterministicClientId = async (orderId: number) => {
+  const digest = new DataView(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`order:${orderId}`)));
+  return `${digest.getUint32(0) || 1}.${digest.getUint32(4) || 1}`;
+};
+
+const trackedItems = (items: any[]) => (Array.isArray(items) ? items : []).map((item) => ({
+  id: String(item.product_id || "produto"),
+  name: String(item.title || "Kit 10 Peças Colinox"),
+  variant: String(item.variant_name || ""),
+  price: Number(item.unit_price || 0),
+  quantity: Number(item.quantity || 1),
+}));
+
+const sendMarketingPurchase = async (integration: MarketingIntegration, secret: string, order: any) => {
+  const items = trackedItems(order.items);
+  const value = Number(order.amount || 0);
+  const eventId = `purchase_${order.id}`;
+  const eventTime = Math.floor(Date.now() / 1000);
+  const email = await sha256(order.customer_email);
+  const phone = await sha256(String(order.phone || "").replace(/\D/g, ""));
+  const externalId = await sha256(String(order.customer_tax_id || "").replace(/\D/g, ""));
+  let endpoint = "";
+  let options: RequestInit = {};
+  if (integration.provider === "google") {
+    endpoint = `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(integration.tracking_id)}&api_secret=${encodeURIComponent(secret)}`;
+    options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+      client_id: await deterministicClientId(Number(order.id)), timestamp_micros: Date.now() * 1000,
+      events: [{ name: "purchase", params: { transaction_id: String(order.id), currency: order.currency || "BRL", value,
+        items: items.map((item) => ({ item_id: item.id, item_name: item.name, item_variant: item.variant, price: item.price, quantity: item.quantity })) } }],
+    }) };
+  } else if (integration.provider === "meta") {
+    endpoint = `https://graph.facebook.com/${encodeURIComponent(integration.tracking_id)}/events?access_token=${encodeURIComponent(secret)}`;
+    options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ data: [{
+      event_name: "Purchase", event_time: eventTime, event_id: eventId, action_source: "website",
+      event_source_url: "https://ca-arolatkk.vercel.app/checkout",
+      user_data: { ...(email && { em: [email] }), ...(phone && { ph: [phone] }), ...(externalId && { external_id: [externalId] }) },
+      custom_data: { currency: order.currency || "BRL", value, order_id: String(order.id), content_type: "product",
+        contents: items.map((item) => ({ id: item.id, quantity: item.quantity, item_price: item.price })) },
+    }] }) };
+  } else {
+    endpoint = "https://business-api.tiktok.com/open_api/v1.3/event/track/";
+    options = { method: "POST", headers: { "Content-Type": "application/json", "Access-Token": secret }, body: JSON.stringify({
+      event_source: "web", event_source_id: integration.tracking_id, data: [{ event: "Purchase", event_time: eventTime, event_id: eventId,
+        user: { ...(email && { email: [email] }), ...(phone && { phone: [phone] }), ...(externalId && { external_id: [externalId] }) },
+        properties: { currency: order.currency || "BRL", value, content_type: "product",
+          contents: items.map((item) => ({ content_id: item.id, content_name: item.name, quantity: item.quantity, price: item.price })) },
+        page: { url: "https://ca-arolatkk.vercel.app/checkout" },
+      }],
+    }) };
+  }
+  const response = await fetch(endpoint, { ...options, signal: AbortSignal.timeout(6000) });
+  const responseText = await response.text();
+  let responseData: any = null;
+  try { responseData = responseText ? JSON.parse(responseText) : null; } catch { responseData = null; }
+  const providerRejected = integration.provider === "tiktok" && responseData?.code != null && Number(responseData.code) !== 0;
+  if (!response.ok || providerRejected || responseData?.error) {
+    const reason = String(responseData?.error?.message || responseData?.message || `HTTP ${response.status}`).slice(0, 220);
+    throw Object.assign(new Error(reason), { responseStatus: response.status });
+  }
+  return response.status;
+};
+
+const dispatchPaidOrder = async (orderId: number) => {
+  const { data: order, error: orderError } = await supabase.from("orders")
+    .select("id,customer_email,phone,customer_tax_id,items,amount,currency,status").eq("id", orderId).single();
+  if (orderError || !order || order.status !== "paid") return;
+  const { data: integrations, error } = await supabase.from("marketing_integrations")
+    .select("id,provider,name,tracking_id,active").eq("active", true).limit(30);
+  if (error) throw error;
+  await Promise.allSettled((integrations || []).map(async (integration: MarketingIntegration) => {
+    const { data: deliveryId, error: claimError } = await supabase.rpc("claim_marketing_delivery", { p_order_id: order.id, p_integration_id: integration.id });
+    if (claimError) throw claimError;
+    if (!deliveryId) return;
+    try {
+      const { data: secret, error: secretError } = await supabase.rpc("get_marketing_secret", { p_integration_id: integration.id });
+      if (secretError || !secret) throw secretError || new Error("Credencial não configurada.");
+      const responseStatus = await sendMarketingPurchase(integration, secret, order);
+      await supabase.from("marketing_deliveries").update({ status: "delivered", response_status: responseStatus, last_error: null, updated_at: new Date().toISOString() }).eq("id", deliveryId);
+    } catch (deliveryError) {
+      const safeError = deliveryError instanceof Error ? deliveryError.message.slice(0, 240) : "Falha ao enviar evento.";
+      await supabase.from("marketing_deliveries").update({ status: "failed", response_status: Number((deliveryError as any)?.responseStatus) || null, last_error: safeError, updated_at: new Date().toISOString() }).eq("id", deliveryId);
+      console.warn("Marketing delivery failed:", integration.provider, safeError);
+    }
+  }));
 };
 
 const handleStatus = async (req: Request, url: URL) => {
@@ -354,6 +513,7 @@ const handleWebhook = async (req: Request, url: URL) => {
   }
   const { error } = await supabase.from("orders").update(update).eq("id", order.id);
   if (error) throw error;
+  if (update.status === "paid") await dispatchPaidOrder(Number(order.id));
   return json({ received: true });
 };
 
@@ -364,6 +524,7 @@ Deno.serve(async (req) => {
   try {
     if (action === "status") return await handleStatus(req, url);
     if (action === "credentials") return await handleCredentials(req, url);
+    if (action === "tracking") return await handleTracking(req, url);
     if (action === "checkout") return await handleCheckout(req);
     if (action === "webhook") return await handleWebhook(req, url);
     return json({ error: "Rota não encontrada." }, 404);
