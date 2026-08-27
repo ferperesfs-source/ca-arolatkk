@@ -171,7 +171,7 @@ const handleCheckout = async (req: Request) => {
         settings: {
           defaultPaymentMethod: "pix", requestAddress: true, requestPhone: true, requestDocument: true, traceable: true,
           pix: { enabled: true, expiresInDays: 2 }, boleto: { enabled: false, expiresInDays: 2 },
-          card: { enabled: true, freeInstallments: 1, maxInstallments: 12 },
+          card: { enabled: false, freeInstallments: 1, maxInstallments: 1 },
         },
         splits: [],
       }),
