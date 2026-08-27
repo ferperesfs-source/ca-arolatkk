@@ -125,6 +125,12 @@
   };
 
   const renderProducts = (products) => {
+    const productImages = {
+      marmore: 'cart-marmore.png',
+      quartzo: 'assets/products/quartzo.webp',
+      grafite: 'assets/products/grafite.webp',
+      oliva: 'assets/products/oliva.webp'
+    };
     const totalKnown = products.reduce((sum, product) => sum + (product.stock_quantity ?? 0), 0);
     document.querySelector('[data-product-count]').textContent = `${products.length} variações ativas`;
     document.querySelector('[data-stock-total]').textContent = products.every((product) => product.stock_quantity == null) ? 'Não informado' : `${totalKnown} un.`;
@@ -134,7 +140,7 @@
       const quantity = product.stock_quantity;
       const stockClass = quantity == null ? 'unknown' : quantity < 10 ? 'low' : '';
       const stockLabel = quantity == null ? 'Não informado' : quantity < 10 ? 'Estoque baixo' : 'Disponível';
-      return `<article class="product-card" data-search="${escapeHtml(`${product.title} ${product.variant_name}`.toLocaleLowerCase('pt-BR'))}"><img src="${escapeHtml(product.image_url || 'cart-marmore.png')}" alt="${escapeHtml(`${product.title} ${product.variant_name}`)}" loading="lazy"><div class="product-card-header"><span><h3>${escapeHtml(product.variant_name)}</h3><small>${escapeHtml(product.title)}</small></span><strong>${money(product.price)}</strong></div><div class="stock-row"><span>Estoque <b>${quantity == null ? '—' : quantity}</b></span><span class="stock-pill ${stockClass}">${stockLabel}</span></div></article>`;
+      return `<article class="product-card" data-search="${escapeHtml(`${product.title} ${product.variant_name}`.toLocaleLowerCase('pt-BR'))}"><img src="${escapeHtml(product.image_url || productImages[product.id] || 'cart-marmore.png')}" alt="${escapeHtml(`${product.title} ${product.variant_name}`)}" loading="lazy"><div class="product-card-header"><span><h3>${escapeHtml(product.variant_name)}</h3><small>${escapeHtml(product.title)}</small></span><strong>${money(product.price)}</strong></div><div class="stock-row"><span>Estoque <b>${quantity == null ? '—' : quantity}</b></span><span class="stock-pill ${stockClass}">${stockLabel}</span></div></article>`;
     }).join('') : '<p class="empty-state">Nenhum produto ativo cadastrado.</p>';
     const knownLow = products.filter((product) => product.stock_quantity != null && product.stock_quantity < 10);
     document.querySelector('[data-low-stock-total]').textContent = String(knownLow.length);

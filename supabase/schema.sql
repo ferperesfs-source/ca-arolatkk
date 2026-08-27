@@ -155,9 +155,9 @@ grant usage, select on all sequences in schema public to anon, authenticated;
 insert into public.products (id,title,variant_name,price,currency,image_url,stock_quantity,active,sort_order)
 values
   ('marmore','Kit 10 Peças Colinox','Mármore',87.90,'BRL','cart-marmore.png',null,true,1),
-  ('quartzo','Kit 10 Peças Colinox','Quartzo',79.90,'BRL',null,null,true,2),
-  ('grafite','Kit 10 Peças Colinox','Grafite',89.90,'BRL',null,null,true,3),
-  ('oliva','Kit 10 Peças Colinox','Oliva',89.90,'BRL',null,null,true,4)
+  ('quartzo','Kit 10 Peças Colinox','Quartzo',79.90,'BRL','assets/products/quartzo.webp',null,true,2),
+  ('grafite','Kit 10 Peças Colinox','Grafite',89.90,'BRL','assets/products/grafite.webp',null,true,3),
+  ('oliva','Kit 10 Peças Colinox','Oliva',89.90,'BRL','assets/products/oliva.webp',null,true,4)
 on conflict (id) do update set
   title = excluded.title,
   variant_name = excluded.variant_name,
