@@ -133,7 +133,7 @@
     }
     body.innerHTML = orders.map((order) => {
       const initials = order.customer_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
-      const product = (order.items || []).map((item) => `${item.variant_name || item.title} ×${item.quantity}`).join(', ');
+      const product = [...(order.items || []), ...(order.addons || [])].map((item) => `${item.variant_name || item.title} ×${item.quantity}`).join(', ');
       const [label, className] = statusInfo[order.status] || [order.status, 'waiting'];
       return `<tr data-status="${escapeHtml(label)}"><td><strong>#CLX-${String(order.id).padStart(4, '0')}</strong></td><td><span class="customer"><i>${escapeHtml(initials)}</i><span>${escapeHtml(order.customer_name)}<small>${escapeHtml(order.customer_email)}</small></span></span></td><td>${escapeHtml(product)}</td><td><strong>${money(order.amount)}</strong></td><td><span class="status ${className}">${escapeHtml(label)}</span></td><td>${dateTime(order.created_at)}</td></tr>`;
     }).join('');
@@ -378,7 +378,7 @@
       const membership = await api.request(`/rest/v1/admin_users?user_id=eq.${encodeURIComponent(session.user.id)}&select=display_name,email`, {}, session.access_token);
       if (!membership?.length) throw new Error('Acesso administrativo não autorizado.');
       const [orders, products, events, gatewayRows, primecashHealth, titansHealth, trackingResponse] = await Promise.all([
-        api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
+        api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,addons,shipping_method,shipping_amount,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
         api.request('/rest/v1/products?select=id,title,variant_name,price,image_url,stock_quantity,active&active=eq.true&order=sort_order.asc', {}, session.access_token),
         api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token),
         api.request('/rest/v1/gateway_settings?select=provider,active,updated_at&order=provider.asc', {}, session.access_token),

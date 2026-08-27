@@ -228,7 +228,7 @@ const deterministicClientId = async (orderId: number) => {
 };
 
 const trackedItems = (items: any[]) => (Array.isArray(items) ? items : []).map((item) => ({
-  id: String(item.product_id || "produto"),
+  id: String(item.product_id || item.addon_id || "produto"),
   name: String(item.title || "Kit 10 Peças Colinox"),
   variant: String(item.variant_name || ""),
   price: Number(item.unit_price || 0),
@@ -236,7 +236,7 @@ const trackedItems = (items: any[]) => (Array.isArray(items) ? items : []).map((
 }));
 
 const sendMarketingPurchase = async (integration: MarketingIntegration, secret: string, order: any) => {
-  const items = trackedItems(order.items);
+  const items = trackedItems([...(Array.isArray(order.items) ? order.items : []), ...(Array.isArray(order.addons) ? order.addons : [])]);
   const value = Number(order.amount || 0);
   const eventId = `purchase_${order.id}`;
   const eventTime = Math.floor(Date.now() / 1000);
@@ -249,7 +249,7 @@ const sendMarketingPurchase = async (integration: MarketingIntegration, secret: 
     endpoint = `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(integration.tracking_id)}&api_secret=${encodeURIComponent(secret)}`;
     options = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
       client_id: await deterministicClientId(Number(order.id)), timestamp_micros: Date.now() * 1000,
-      events: [{ name: "purchase", params: { transaction_id: String(order.id), currency: order.currency || "BRL", value,
+      events: [{ name: "purchase", params: { transaction_id: String(order.id), currency: order.currency || "BRL", value, shipping: Number(order.shipping_amount || 0),
         items: items.map((item) => ({ item_id: item.id, item_name: item.name, item_variant: item.variant, price: item.price, quantity: item.quantity })) } }],
     }) };
   } else if (integration.provider === "meta") {
@@ -286,7 +286,7 @@ const sendMarketingPurchase = async (integration: MarketingIntegration, secret: 
 
 const dispatchPaidOrder = async (orderId: number) => {
   const { data: order, error: orderError } = await supabase.from("orders")
-    .select("id,customer_email,phone,customer_tax_id,items,amount,currency,status").eq("id", orderId).single();
+    .select("id,customer_email,phone,customer_tax_id,items,addons,shipping_amount,amount,currency,status").eq("id", orderId).single();
   if (orderError || !order || order.status !== "paid") return;
   const { data: integrations, error } = await supabase.from("marketing_integrations")
     .select("id,provider,name,tracking_id,active").eq("active", true).limit(30);
@@ -373,6 +373,8 @@ const handleCheckout = async (req: Request) => {
     product_id: productId(item.productId),
     quantity: Math.max(0, Math.min(99, Number.parseInt(item.quantity, 10) || 0)),
   })) : [];
+  const addons = Array.isArray(body.addons) ? body.addons.slice(0, 3).map((value: unknown) => productId(value)) : [];
+  const shippingMethod = productId(body.shippingMethod || "free");
   if (name.split(/\s+/).length < 2 || !/^\S+@\S+\.\S+$/.test(email) || phone.length < 10 || ![11, 14].includes(taxId.length)) {
     return json({ error: "Revise os dados de identificação." }, 400);
   }
@@ -380,6 +382,7 @@ const handleCheckout = async (req: Request) => {
     return json({ error: "Revise o endereço de entrega." }, 400);
   }
   if (!items.length || items.some((item: any) => !item.product_id || item.quantity < 1)) return json({ error: "O carrinho contém itens inválidos." }, 400);
+  if (addons.some((id: string) => !id) || new Set(addons).size !== addons.length || !shippingMethod) return json({ error: "Revise as ofertas e a forma de entrega." }, 400);
 
   const { data: settings, error: settingsError } = await supabase.from("gateway_settings").select("provider,active").eq("active", true).maybeSingle();
   if (settingsError) throw settingsError;
@@ -391,14 +394,17 @@ const handleCheckout = async (req: Request) => {
   const reference = crypto.randomUUID();
   const { data: order, error: orderError } = await supabase.from("orders").insert({
     customer_name: name, customer_email: email, phone, customer_tax_id: taxId, items,
+    addons: addons.map((addonId: string) => ({ addon_id: addonId })), shipping_method: shippingMethod,
     shipping_address: [street, streetNumber, complement, neighborhood].filter(Boolean).join(", "),
     city: `${city} - ${state}`, postal_code: postalCode,
     payment_reference: reference, gateway: provider, gateway_status: "creating",
-  }).select("id,payment_reference,amount,items").single();
+  }).select("id,payment_reference,amount,items,addons,shipping_amount,shipping_method").single();
   if (orderError || !order) throw orderError || new Error("Não foi possível registrar o pedido.");
 
   try {
     const amount = Math.round(Number(order.amount) * 100);
+    const paymentItems = [...(order.items || []), ...(order.addons || [])];
+    const shippingFee = Math.round(Number(order.shipping_amount || 0) * 100);
     const transaction = provider === "titans"
       ? await titansRequest("/v1/payment", secret, {
           method: "POST",
@@ -410,14 +416,14 @@ const handleCheckout = async (req: Request) => {
             externalRef: reference,
             notificationUrl: `${FUNCTION_URL}/webhook?provider=titans&reference=${encodeURIComponent(reference)}`,
             payer: { name, taxId, email, phone },
-            items: order.items.map((item: any) => ({
+            items: paymentItems.map((item: any) => ({
               quantity: Number(item.quantity),
-              name: `${item.title} - ${item.variant_name}`,
+              name: item.variant_name ? `${item.title} - ${item.variant_name}` : item.title,
               price: Math.round(Number(item.unit_price) * 100),
               type: "PHYSICAL",
             })),
             delivery: {
-              fee: 0,
+              fee: shippingFee,
               address: {
                 country: "BR", state, city, district: neighborhood, street, number: streetNumber,
                 complement: complement || null, zipCode: postalCode,
@@ -436,18 +442,18 @@ const handleCheckout = async (req: Request) => {
               externalRef: reference,
             },
             shipping: {
-              fee: 0,
+              fee: shippingFee,
               address: {
                 street, streetNumber, complement: complement || undefined, zipCode: postalCode,
                 neighborhood, city, state, country: "BR",
               },
             },
             postbackUrl: `${FUNCTION_URL}/webhook?provider=primecash&reference=${encodeURIComponent(reference)}`,
-            items: order.items.map((item: any) => ({
-              title: `${item.title} - ${item.variant_name}`,
+            items: paymentItems.map((item: any) => ({
+              title: item.variant_name ? `${item.title} - ${item.variant_name}` : item.title,
               unitPrice: Math.round(Number(item.unit_price) * 100),
               quantity: Number(item.quantity), tangible: true,
-              externalRef: `${reference}:${item.product_id}`,
+              externalRef: `${reference}:${item.product_id || item.addon_id}`,
             })),
             pix: { expiresInDays: 2 },
             metadata: JSON.stringify({ orderId: order.id, reference }),
@@ -469,6 +475,7 @@ const handleCheckout = async (req: Request) => {
       pixCode,
       qrCodeImage,
       expiresAt: provider === "primecash" ? transaction.pix?.expirationDate || null : null,
+      amount: Number(order.amount),
     });
   } catch (error) {
     await supabase.from("orders").update({ status: "cancelled", gateway_status: "creation_failed", updated_at: new Date().toISOString() }).eq("id", order.id);

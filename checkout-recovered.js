@@ -46,6 +46,33 @@
     ? storedCart.items.filter((item) => item && item.qty > 0)
     : fallbackItems;
 
+  const orderBumps = [
+    { id: 'jantar', title: 'Jogo de Jantar 10 Peças Oxford Ryo Maresia', oldPrice: 189.9, price: 46.2, discount: '-78%', tag: 'Somente hoje esse valor', image: 'assets/checkout/order-bump-jantar.png' },
+    { id: 'potes', title: 'Kit 10 Potes de Vidro Herméticos Colinox', oldPrice: 139.9, price: 36.45, discount: '-77%', image: 'assets/checkout/order-bump-potes.png' },
+    { id: 'panela', title: 'Panela de Pressão Colinox Antiaderente 4,2L', oldPrice: 219.9, price: 55.47, discount: '-75%', tag: 'Mais vendida', image: 'assets/checkout/order-bump-panela.png' }
+  ];
+  const shippingMethods = [
+    { id: 'free', title: 'Frete Grátis', description: 'Entrega em 10 a 12 dias', price: 0, image: 'assets/checkout/shipping-free.jpg' },
+    { id: 'jadlog', title: 'JADLOG', description: 'Entrega em até 5 dias úteis', price: 18.47, image: 'assets/checkout/shipping-jadlog.jpg' },
+    { id: 'sedex-12', title: 'SEDEX 12', description: 'Entrega de 12h a 24h', price: 33.4, image: 'assets/checkout/shipping-sedex.png' }
+  ];
+  const purchase = { customer: null, shipping: null, addons: [], shippingMethod: 'free' };
+
+  const extrasStyle = document.createElement('style');
+  extrasStyle.id = 'checkout-extras-style';
+  extrasStyle.textContent = `
+    .checkout-extras{display:grid;gap:16px;margin-top:4px}.checkout-extras__heading{margin:0;font-size:15px;font-weight:800;color:#111827}.checkout-extras__sub{margin:3px 0 0;font-size:12px;line-height:1.45;color:#6b7280}
+    .checkout-options{display:grid;gap:10px;margin-top:11px}.checkout-option{position:relative;width:100%;min-height:88px;display:grid;grid-template-columns:22px 68px minmax(0,1fr);align-items:center;gap:10px;padding:10px;border:1.5px solid #e5e7eb;border-radius:14px;background:#fff;color:#111827;text-align:left;cursor:pointer;transition:border-color .16s ease,background-color .16s ease,box-shadow .16s ease,transform .16s ease}
+    .checkout-option:hover{border-color:#fda4b8}.checkout-option:focus-visible{outline:3px solid rgba(239,47,88,.22);outline-offset:2px}.checkout-option[aria-pressed=true],.checkout-option[aria-checked=true]{border-color:#ef2f58;background:#fff7f9;box-shadow:0 0 0 1px rgba(239,47,88,.06)}
+    .checkout-option__check{width:20px;height:20px;display:grid;place-items:center;border:2px solid #d1d5db;border-radius:50%;background:#fff;font-size:12px;font-weight:900;color:#fff}.checkout-option[aria-pressed=true] .checkout-option__check,.checkout-option[aria-checked=true] .checkout-option__check{border-color:#ef2f58;background:#ef2f58}.checkout-option[aria-pressed=true] .checkout-option__check::after,.checkout-option[aria-checked=true] .checkout-option__check::after{content:'✓'}
+    .checkout-option__image{width:68px;height:68px;display:block;border-radius:10px;object-fit:contain;background:#f8fafc}.checkout-option__content{min-width:0}.checkout-option__title{display:block;font-size:13px;font-weight:750;line-height:1.3}.checkout-option__prices{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:5px}.checkout-option__discount{padding:2px 6px;border-radius:6px;background:#e11d48;color:#fff;font-size:10px;font-weight:800}.checkout-option__old{font-size:11px;color:#9ca3af;text-decoration:line-through}.checkout-option__price{display:block;margin-top:3px;color:#059669;font-size:15px;font-weight:850}.checkout-option__tag{position:absolute;top:-9px;right:10px;padding:4px 9px;border-radius:999px;background:linear-gradient(135deg,#f6d365,#b8860b);color:#3b2a05;font-size:9px;font-weight:850;letter-spacing:.45px;text-transform:uppercase;box-shadow:0 4px 10px rgba(184,134,11,.25)}
+    .shipping-option{grid-template-columns:22px 58px minmax(0,1fr) auto;min-height:76px}.shipping-option .checkout-option__image{width:58px;height:48px}.shipping-option__price{font-size:13px;font-weight:800;color:#111827;white-space:nowrap}.shipping-option__description{display:block;margin-top:3px;font-size:11px;color:#6b7280}
+    .checkout-breakdown{display:grid;gap:8px;padding:13px 14px;border:1px solid #e5e7eb;border-radius:13px;background:#fafafa}.checkout-breakdown__row{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#6b7280}.checkout-breakdown__row strong{color:#111827}.checkout-breakdown__row--total{padding-top:9px;border-top:1px solid #e5e7eb;font-size:14px;color:#111827}
+    @media(max-width:390px){.checkout-option{grid-template-columns:20px 58px minmax(0,1fr);gap:8px}.checkout-option__image{width:58px;height:58px}.shipping-option{grid-template-columns:20px 48px minmax(0,1fr)}.shipping-option .checkout-option__image{width:48px;height:42px}.shipping-option__price{grid-column:3;margin-top:3px}}
+    @media(prefers-reduced-motion:reduce){.checkout-option{transition:none}}
+  `;
+  document.head.appendChild(extrasStyle);
+
   const cartSection = document.querySelector('main > section');
   if (!cartSection || !items.length) return;
 
@@ -59,15 +86,32 @@
   const totalRow = cartSection.children[5];
   const renderedRows = [];
 
+  const calculateTotals = () => {
+    const subtotal = items.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const addons = orderBumps.filter((offer) => purchase.addons.includes(offer.id)).reduce((sum, offer) => sum + offer.price, 0);
+    const shipping = shippingMethods.find((method) => method.id === purchase.shippingMethod)?.price || 0;
+    return { subtotal, addons, shipping, total: subtotal + addons + shipping };
+  };
+
   const refreshTotals = () => {
-    const totalItems = items.reduce((sum, item) => sum + item.qty, 0);
-    const totalPrice = items.reduce((sum, item) => sum + item.price * item.qty, 0);
+    const selectedAddonCount = purchase.addons.length;
+    const totalItems = items.reduce((sum, item) => sum + item.qty, 0) + selectedAddonCount;
+    const prices = calculateTotals();
 
     if (countBadge) countBadge.textContent = String(totalItems);
     const subtotalValue = totals?.children[0]?.lastElementChild;
+    const shippingName = totals?.querySelector('.lv-frete-name');
+    const shippingValue = totals?.children[1]?.lastElementChild;
     const totalValue = totalRow?.lastElementChild;
-    if (subtotalValue) subtotalValue.textContent = money(totalPrice);
-    if (totalValue) totalValue.textContent = money(totalPrice);
+    if (subtotalValue) subtotalValue.textContent = money(prices.subtotal + prices.addons);
+    const selectedShipping = shippingMethods.find((method) => method.id === purchase.shippingMethod) || shippingMethods[0];
+    if (shippingName) shippingName.textContent = selectedShipping.title;
+    if (shippingValue) shippingValue.textContent = prices.shipping ? money(prices.shipping) : 'Grátis';
+    if (totalValue) totalValue.textContent = money(prices.total);
+    document.querySelectorAll('[data-checkout-subtotal]').forEach((element) => { element.textContent = money(prices.subtotal); });
+    document.querySelectorAll('[data-checkout-addons]').forEach((element) => { element.textContent = money(prices.addons); });
+    document.querySelectorAll('[data-checkout-shipping]').forEach((element) => { element.textContent = prices.shipping ? money(prices.shipping) : 'Grátis'; });
+    document.querySelectorAll('[data-checkout-grand-total]').forEach((element) => { element.textContent = money(prices.total); });
 
     renderedRows.forEach(({ row, item }) => {
       const quantity = row.lastElementChild?.querySelector('span');
@@ -142,7 +186,6 @@
   const formSection = progressSection?.nextElementSibling;
   const identificationContent = formSection?.firstElementChild;
   const productIds = { 'mármore': 'marmore', marmore: 'marmore', quartzo: 'quartzo', grafite: 'grafite', oliva: 'oliva' };
-  const purchase = { customer: null, shipping: null };
   let formMessage;
   const showFormMessage = (message, error = false) => {
     if (!formMessage) {
@@ -181,6 +224,39 @@
 
   const resetMessage = () => { formMessage = null; };
 
+  const orderBumpsMarkup = () => `<section class="checkout-extras" aria-labelledby="checkout-bumps-title">
+    <div><h3 class="checkout-extras__heading" id="checkout-bumps-title">Adicione essas ofertas na sua compra</h3><p class="checkout-extras__sub">Aproveite os valores especiais. Você pode escolher mais de uma oferta.</p></div>
+    <div class="checkout-options">${orderBumps.map((offer) => {
+      const selected = purchase.addons.includes(offer.id);
+      return `<button class="checkout-option" type="button" data-addon-id="${offer.id}" aria-pressed="${selected}">
+        ${offer.tag ? `<span class="checkout-option__tag">${escapeHtml(offer.tag)}</span>` : ''}<span class="checkout-option__check" aria-hidden="true"></span>
+        <img class="checkout-option__image" src="${offer.image}" width="68" height="68" loading="lazy" decoding="async" alt="">
+        <span class="checkout-option__content"><span class="checkout-option__title">${escapeHtml(offer.title)}</span><span class="checkout-option__prices"><span class="checkout-option__discount">${offer.discount}</span><span class="checkout-option__old">${money(offer.oldPrice)}</span></span><span class="checkout-option__price">+ ${money(offer.price)}</span></span>
+      </button>`;
+    }).join('')}</div>
+  </section>`;
+
+  const shippingMethodsMarkup = () => `<fieldset class="checkout-extras" style="border:0;padding:0;margin:0" aria-describedby="shipping-method-help">
+    <div><legend class="checkout-extras__heading">Escolha uma forma de entrega:</legend><p class="checkout-extras__sub" id="shipping-method-help">Selecione o prazo e o valor que preferir.</p></div>
+    <div class="checkout-options" role="radiogroup">${shippingMethods.map((method) => {
+      const selected = method.id === purchase.shippingMethod;
+      return `<button class="checkout-option shipping-option" type="button" role="radio" data-shipping-method="${method.id}" aria-checked="${selected}">
+        <span class="checkout-option__check" aria-hidden="true"></span><img class="checkout-option__image" src="${method.image}" width="58" height="48" loading="lazy" decoding="async" alt="">
+        <span class="checkout-option__content"><span class="checkout-option__title">${escapeHtml(method.title)}</span><span class="shipping-option__description">${escapeHtml(method.description)}</span></span><span class="shipping-option__price">${method.price ? money(method.price) : 'Grátis'}</span>
+      </button>`;
+    }).join('')}</div>
+  </fieldset>`;
+
+  const totalsMarkup = () => {
+    const prices = calculateTotals();
+    return `<div class="checkout-breakdown" aria-live="polite">
+      <div class="checkout-breakdown__row"><span>Produtos</span><strong data-checkout-subtotal>${money(prices.subtotal)}</strong></div>
+      <div class="checkout-breakdown__row"><span>Ofertas adicionais</span><strong data-checkout-addons>${money(prices.addons)}</strong></div>
+      <div class="checkout-breakdown__row"><span>Entrega</span><strong data-checkout-shipping>${prices.shipping ? money(prices.shipping) : 'Grátis'}</strong></div>
+      <div class="checkout-breakdown__row checkout-breakdown__row--total"><strong>Total</strong><strong data-checkout-grand-total>${money(prices.total)}</strong></div>
+    </div>`;
+  };
+
   const renderDelivery = () => {
     if (!formSection) return;
     formSection.innerHTML = `<div class="space-y-4">
@@ -190,7 +266,9 @@
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:12px"><label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Número</span><input class="tt-input" name="number" autocomplete="address-line2" maxlength="20" placeholder="123"></label><label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Complemento</span><input class="tt-input" name="complement" maxlength="80" placeholder="Opcional"></label></div>
       <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Bairro</span><input class="tt-input" name="neighborhood" maxlength="100" placeholder="Seu bairro"></label>
       <div style="display:grid;grid-template-columns:minmax(0,2fr) minmax(82px,.7fr);gap:12px"><label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Cidade</span><input class="tt-input" name="city" autocomplete="address-level2" maxlength="100" placeholder="Cidade"></label><label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">UF</span><input class="tt-input" name="state" autocomplete="address-level1" maxlength="2" placeholder="SP" style="text-transform:uppercase"></label></div>
-      <div style="border:1px solid rgb(209 250 229);background:rgb(236 253 245);border-radius:12px;padding:13px 14px"><strong style="display:block;font-size:13px;color:rgb(6 95 70)">Frete grátis</strong><span style="font-size:12px;color:rgb(4 120 87)">Entrega segura para todo o Brasil.</span></div>
+      ${orderBumpsMarkup()}
+      ${shippingMethodsMarkup()}
+      ${totalsMarkup()}
       <div style="display:grid;grid-template-columns:96px 1fr;gap:10px"><button class="tt-btn" type="button" data-back-identification style="background:#fff;color:rgb(23 23 23);border:1px solid rgb(229 229 229)">VOLTAR</button><button class="tt-btn" type="button" data-go-payment>IR PARA O PAGAMENTO</button></div>
     </div>`;
     resetMessage();
@@ -201,6 +279,23 @@
       });
     }
     checkoutButton = formSection.querySelector('[data-go-payment]');
+    formSection.querySelectorAll('[data-addon-id]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const addonId = button.dataset.addonId;
+        purchase.addons = purchase.addons.includes(addonId)
+          ? purchase.addons.filter((id) => id !== addonId)
+          : [...purchase.addons, addonId];
+        button.setAttribute('aria-pressed', String(purchase.addons.includes(addonId)));
+        refreshTotals();
+      });
+    });
+    formSection.querySelectorAll('[data-shipping-method]').forEach((button) => {
+      button.addEventListener('click', () => {
+        purchase.shippingMethod = button.dataset.shippingMethod;
+        formSection.querySelectorAll('[data-shipping-method]').forEach((option) => option.setAttribute('aria-checked', String(option === button)));
+        refreshTotals();
+      });
+    });
     const postalCodeInput = formSection.querySelector('[name="postalCode"]');
     const postalCodeHelp = formSection.querySelector('#postal-code-help');
     let postalCodeRequest;
@@ -333,12 +428,14 @@
     button.disabled = true;
     button.textContent = 'ABRINDO PAGAMENTO...';
     try {
-      await api?.track('checkout_started', { item_count: items.reduce((sum, item) => sum + item.qty, 0) });
+      await api?.track('checkout_started', { item_count: items.reduce((sum, item) => sum + item.qty, 0) + purchase.addons.length });
       const data = await api.primecashRequest('/checkout', {
         method: 'POST',
         body: JSON.stringify({
           customer: purchase.customer,
           shipping: purchase.shipping,
+          addons: purchase.addons,
+          shippingMethod: purchase.shippingMethod,
           items: items.map((item) => ({
             productId: productIds[item.name.toLocaleLowerCase('pt-BR')] || item.name.toLocaleLowerCase('pt-BR').normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
             quantity: item.qty
@@ -364,7 +461,7 @@
       : '';
     formSection.innerHTML = `<div class="space-y-4">
       <div><h2 style="font-size:18px;font-weight:700;color:rgb(23 23 23);margin:0">Pague com Pix</h2><p style="font-size:12px;color:rgb(115 115 115);margin:5px 0 0">Escaneie o QR Code ou copie o código abaixo.</p></div>
-      <div style="border:1px solid rgb(229 229 229);border-radius:16px;padding:16px;display:grid;place-items:center;gap:10px;background:#fff"><img data-pix-qr width="220" height="220" alt="QR Code Pix para pagamento" style="display:block;width:min(220px,72vw);height:auto;aspect-ratio:1;background:#fff"><strong style="font-size:17px;color:rgb(23 23 23)">${money(items.reduce((sum, item) => sum + item.price * item.qty, 0))}</strong>${expiration ? `<span style="font-size:11px;color:rgb(115 115 115)">Válido até ${escapeHtml(expiration)}</span>` : ''}</div>
+      <div style="border:1px solid rgb(229 229 229);border-radius:16px;padding:16px;display:grid;place-items:center;gap:10px;background:#fff"><img data-pix-qr width="220" height="220" alt="QR Code Pix para pagamento" style="display:block;width:min(220px,72vw);height:auto;aspect-ratio:1;background:#fff"><strong style="font-size:17px;color:rgb(23 23 23)">${money(Number(payment.amount) || calculateTotals().total)}</strong>${expiration ? `<span style="font-size:11px;color:rgb(115 115 115)">Válido até ${escapeHtml(expiration)}</span>` : ''}</div>
       <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Pix copia e cola</span><textarea data-pix-code readonly rows="3" style="width:100%;box-sizing:border-box;resize:none;border:1px solid rgb(229 229 229);border-radius:12px;padding:11px 12px;background:rgb(250 250 250);color:rgb(64 64 64);font:500 11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere"></textarea></label>
       <button class="tt-btn" type="button" data-copy-pix>COPIAR CÓDIGO PIX</button>
       <p data-pix-copy-status role="status" aria-live="polite" style="min-height:17px;margin:0;text-align:center;font-size:11px;color:rgb(5 150 105)"></p>
@@ -395,9 +492,11 @@
   const renderPayment = () => {
     if (!formSection) return;
     const address = escapeHtml(`${purchase.shipping.street}, ${purchase.shipping.number}${purchase.shipping.complement ? `, ${purchase.shipping.complement}` : ''} — ${purchase.shipping.city}/${purchase.shipping.state}`);
+    const selectedShipping = shippingMethods.find((method) => method.id === purchase.shippingMethod) || shippingMethods[0];
     formSection.innerHTML = `<div class="space-y-4">
       <div><h2 style="font-size:18px;font-weight:700;color:rgb(23 23 23);margin:0">Pagamento seguro</h2><p style="font-size:12px;color:rgb(115 115 115);margin:5px 0 0">Conclua sua compra via Pix em um ambiente protegido.</p></div>
-      <div style="border:1px solid rgb(229 229 229);border-radius:14px;padding:15px;display:grid;gap:9px"><div style="display:flex;justify-content:space-between;gap:16px;font-size:12px"><span style="color:rgb(115 115 115)">Cliente</span><strong style="text-align:right;color:rgb(23 23 23)">${escapeHtml(purchase.customer.name)}</strong></div><div style="display:flex;justify-content:space-between;gap:16px;font-size:12px"><span style="color:rgb(115 115 115)">Entrega</span><strong style="text-align:right;color:rgb(23 23 23)">${address}</strong></div><div style="display:flex;justify-content:space-between;gap:16px;font-size:13px;padding-top:10px;border-top:1px solid rgb(245 245 245)"><span style="color:rgb(64 64 64)">Total</span><strong style="color:rgb(23 23 23)">${money(items.reduce((sum, item) => sum + item.price * item.qty, 0))}</strong></div></div>
+      <div style="border:1px solid rgb(229 229 229);border-radius:14px;padding:15px;display:grid;gap:9px"><div style="display:flex;justify-content:space-between;gap:16px;font-size:12px"><span style="color:rgb(115 115 115)">Cliente</span><strong style="text-align:right;color:rgb(23 23 23)">${escapeHtml(purchase.customer.name)}</strong></div><div style="display:flex;justify-content:space-between;gap:16px;font-size:12px"><span style="color:rgb(115 115 115)">Entrega</span><strong style="text-align:right;color:rgb(23 23 23)">${address}</strong></div><div style="display:flex;justify-content:space-between;gap:16px;font-size:12px"><span style="color:rgb(115 115 115)">Modalidade</span><strong style="text-align:right;color:rgb(23 23 23)">${escapeHtml(selectedShipping.title)} · ${escapeHtml(selectedShipping.description)}</strong></div></div>
+      ${totalsMarkup()}
       <div style="display:grid;grid-template-columns:96px 1fr;gap:10px"><button class="tt-btn" type="button" data-back-delivery style="background:#fff;color:rgb(23 23 23);border:1px solid rgb(229 229 229)">VOLTAR</button><button class="tt-btn" type="button" data-create-payment>CONTINUAR PARA PAGAMENTO</button></div>
       <p style="font-size:11px;line-height:1.45;text-align:center;color:rgb(115 115 115);margin:0">Ao continuar, você será redirecionado para concluir o pagamento.</p>
     </div>`;
