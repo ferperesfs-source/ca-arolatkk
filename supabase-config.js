@@ -1,10 +1,7 @@
 (() => {
   const url = 'https://futysxjtptcsahgyrpci.supabase.co';
   const publishableKey = 'sb_publishable_5ZHATfufgFDbhiJnFBp4ig_xaxf-1Oq';
-  const isLocalPreview = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-  const primecashFunctionUrl = isLocalPreview
-    ? `${url}/functions/v1/primecash`
-    : '/api/order-session';
+  const primecashFunctionUrl = `${url}/functions/v1/primecash`;
   const sessionKey = 'cacarolaAdminSession';
 
   const request = async (path, options = {}, accessToken = '') => {
