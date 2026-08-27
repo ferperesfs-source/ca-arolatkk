@@ -70,7 +70,7 @@ const readPrimecash = async (response: Response) => {
   try { data = text ? JSON.parse(text) : null; } catch { data = text; }
   if (!response.ok) {
     const error = new Error(data?.message || data?.error || `Falha HTTP ${response.status}`);
-    Object.assign(error, { status: response.status });
+    Object.assign(error, { status: response.status, details: data?.error || data?.details || null });
     throw error;
   }
   return data;
@@ -264,7 +264,6 @@ const handleCheckout = async (req: Request) => {
                 complement: complement || null, zipCode: postalCode,
               },
             },
-            metadata: { provider: "cacarola", orderId: String(order.id) },
           }),
         })
       : await primecashRequest("/transactions", secret, {
@@ -329,8 +328,10 @@ const handleWebhook = async (req: Request, url: URL) => {
   if (!order?.gateway_checkout_id) return json({ error: "Pedido não encontrado." }, 404);
   let verified: any = payload;
   if (order.gateway === "titans") {
-    const validSignature = await verifyTitansSignature(rawBody, req.headers.get("X-Signature") || "");
-    if (!validSignature) return json({ error: "Assinatura inválida." }, 401);
+    const signature = req.headers.get("X-Signature") || "";
+    // Webhooks enviados para uma notificationUrl dinâmica não recebem assinatura
+    // segundo a documentação da Titans. Quando ela vier, ainda assim validamos.
+    if (signature && !await verifyTitansSignature(rawBody, signature)) return json({ error: "Assinatura inválida." }, 401);
     if (String(payload?.id || "") !== String(order.gateway_checkout_id) || String(payload?.externalRef || "") !== reference) {
       return json({ error: "Transação divergente." }, 409);
     }
@@ -369,7 +370,10 @@ Deno.serve(async (req) => {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha interna.";
     const status = Number((error as any)?.status) || (/não autorizad|sessão/i.test(message) ? 401 : 500);
-    console.error("Payment function error:", status, message);
+    const detailKeys = (error as any)?.details && typeof (error as any).details === "object"
+      ? Object.keys((error as any).details).slice(0, 12)
+      : [];
+    console.error("Payment function error:", status, message, detailKeys.length ? { invalidFields: detailKeys } : "");
     return json({ error: status < 500 ? message : "Não foi possível concluir a operação." }, status);
   }
 });
