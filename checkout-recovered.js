@@ -182,7 +182,7 @@
     if (!formSection) return;
     formSection.innerHTML = `<div class="space-y-4">
       <div><h2 style="font-size:18px;font-weight:700;color:rgb(23 23 23);margin:0">Onde devemos entregar?</h2><p style="font-size:12px;color:rgb(115 115 115);margin:5px 0 0">Informe o endereço que receberá o seu pedido.</p></div>
-      <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">CEP</span><input class="tt-input" name="postalCode" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="00000-000"></label>
+      <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">CEP</span><input class="tt-input" name="postalCode" inputmode="numeric" autocomplete="postal-code" maxlength="9" placeholder="00000-000" aria-describedby="postal-code-help"><span id="postal-code-help" role="status" aria-live="polite" style="display:block;min-height:18px;margin-top:6px;font-size:11px;line-height:1.45;color:rgb(115 115 115)">Digite o CEP para preencher o endereço automaticamente.</span></label>
       <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Endereço</span><input class="tt-input" name="street" autocomplete="street-address" maxlength="140" placeholder="Rua ou avenida"></label>
       <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr);gap:12px"><label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Número</span><input class="tt-input" name="number" autocomplete="address-line2" maxlength="20" placeholder="123"></label><label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Complemento</span><input class="tt-input" name="complement" maxlength="80" placeholder="Opcional"></label></div>
       <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Bairro</span><input class="tt-input" name="neighborhood" maxlength="100" placeholder="Seu bairro"></label>
@@ -198,6 +198,77 @@
       });
     }
     checkoutButton = formSection.querySelector('[data-go-payment]');
+    const postalCodeInput = formSection.querySelector('[name="postalCode"]');
+    const postalCodeHelp = formSection.querySelector('#postal-code-help');
+    let postalCodeRequest;
+    let postalCodeTimer;
+    let lastResolvedPostalCode = '';
+    const setPostalCodeHelp = (message, type = 'neutral') => {
+      if (!postalCodeHelp) return;
+      postalCodeHelp.textContent = message;
+      postalCodeHelp.style.color = type === 'error' ? '#b42342' : type === 'success' ? '#087a50' : 'rgb(115 115 115)';
+    };
+    const formatPostalCode = (value) => {
+      const digits = value.replace(/\D/g, '').slice(0, 8);
+      return digits.length > 5 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : digits;
+    };
+    const fillAddressFromPostalCode = async () => {
+      const postalCode = postalCodeInput?.value.replace(/\D/g, '') || '';
+      if (postalCode.length !== 8 || postalCode === lastResolvedPostalCode) return;
+      postalCodeRequest?.abort();
+      const controller = new AbortController();
+      postalCodeRequest = controller;
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 8000);
+      postalCodeInput.setAttribute('aria-busy', 'true');
+      setPostalCodeHelp('Buscando endereço...');
+      try {
+        const response = await fetch(`/api/cep?cep=${postalCode}`, {
+          headers: { Accept: 'application/json' }, signal: controller.signal
+        });
+        if (response.status === 404) {
+          lastResolvedPostalCode = postalCode;
+          setPostalCodeHelp('CEP não encontrado. Confira o número ou preencha o endereço manualmente.', 'error');
+          return;
+        }
+        if (!response.ok) throw new Error('lookup-failed');
+        const address = await response.json();
+        const values = {
+          street: address.street,
+          neighborhood: address.neighborhood,
+          city: address.city,
+          state: address.state
+        };
+        Object.entries(values).forEach(([name, value]) => {
+          const input = formSection.querySelector(`[name="${name}"]`);
+          if (input && value) input.value = value;
+        });
+        lastResolvedPostalCode = postalCode;
+        setPostalCodeHelp('Endereço encontrado. Confira os dados e informe o número.', 'success');
+        if (document.activeElement === postalCodeInput) formSection.querySelector('[name="number"]')?.focus();
+      } catch (error) {
+        if (error.name !== 'AbortError' || timedOut) setPostalCodeHelp('Não foi possível buscar agora. Continue preenchendo manualmente.', 'error');
+      } finally {
+        clearTimeout(timeout);
+        if (postalCodeRequest === controller) postalCodeInput?.removeAttribute('aria-busy');
+      }
+    };
+    postalCodeInput?.addEventListener('input', () => {
+      postalCodeInput.value = formatPostalCode(postalCodeInput.value);
+      clearTimeout(postalCodeTimer);
+      const postalCode = postalCodeInput.value.replace(/\D/g, '');
+      if (postalCode.length < 8) {
+        lastResolvedPostalCode = '';
+        postalCodeRequest?.abort();
+        setPostalCodeHelp('Digite o CEP para preencher o endereço automaticamente.');
+        return;
+      }
+      postalCodeTimer = setTimeout(fillAddressFromPostalCode, 250);
+    });
+    postalCodeInput?.addEventListener('blur', fillAddressFromPostalCode);
     formSection.querySelector('[data-back-identification]')?.addEventListener('click', () => {
       if (!identificationContent) return location.reload();
       identificationContent.querySelector('[data-checkout-message]')?.remove();
