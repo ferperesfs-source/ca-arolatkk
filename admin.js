@@ -82,6 +82,7 @@
   let gatewaySettings = {};
   let gatewayHealth = {};
   let trackingIntegrations = [];
+  let pushcutEndpoints = [];
   const gatewayCatalog = {
     primecash: {
       name: 'PrimeCash Brasil', shortName: 'PrimeCash', logo: 'assets/gateways/primecash-logo.png',
@@ -103,7 +104,8 @@
     '#produtos': { view: 'products', title: 'Produtos', search: 'Buscar produto...' },
     '#clientes': { view: 'customers', title: 'Clientes', search: 'Buscar cliente...' },
     '#gateways': { view: 'gateways', title: 'Gateways', search: 'Gateways de pagamento' },
-    '#rastreamento': { view: 'tracking', title: 'Rastreamento', search: 'Integrações de marketing' }
+    '#rastreamento': { view: 'tracking', title: 'Rastreamento', search: 'Integrações de marketing' },
+    '#pushcut': { view: 'pushcut', title: 'PushCut', search: 'Links de notificação' }
   };
 
   const currentRoute = () => routeConfig[location.hash] || routeConfig['#visao-geral'];
@@ -371,20 +373,41 @@
     if (!form.elements.name.value.trim()) form.elements.name.placeholder = `Ex.: ${meta.name} principal`;
   };
 
+  const renderPushcut = () => {
+    const list = document.querySelector('[data-pushcut-list]');
+    if (!list) return;
+    const active = pushcutEndpoints.filter((item) => item.active && item.configured).length;
+    const deliveredFor = (eventType) => pushcutEndpoints
+      .filter((item) => item.event_type === eventType)
+      .reduce((sum, item) => sum + Number(item.deliveries?.delivered || 0), 0);
+    document.querySelector('[data-pushcut-active]').textContent = String(active);
+    document.querySelector('[data-pushcut-created]').textContent = String(deliveredFor('order_created'));
+    document.querySelector('[data-pushcut-paid]').textContent = String(deliveredFor('order_paid'));
+    list.innerHTML = pushcutEndpoints.length ? pushcutEndpoints.map((item) => {
+      const enabled = Boolean(item.active && item.configured);
+      const eventLabel = item.event_type === 'order_paid' ? 'Pedido pago' : 'Pedido gerado';
+      const delivered = Number(item.deliveries?.delivered || 0);
+      const failed = Number(item.deliveries?.failed || 0);
+      const deliveryCopy = `${delivered} entregue${delivered === 1 ? '' : 's'}${failed ? ` · ${failed} com falha` : ''}`;
+      return `<article class="tracking-item pushcut-item" data-pushcut-id="${escapeHtml(item.id)}"><span class="tracking-provider-mark pushcut" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg></span><div class="tracking-item-main"><span class="tracking-item-title"><strong>${escapeHtml(item.name)}</strong><i class="${enabled ? '' : 'is-inactive'}">${enabled ? 'Ativo' : item.configured ? 'Pausado' : 'Sem URL'}</i><em class="pushcut-event ${escapeHtml(item.event_type)}">${escapeHtml(eventLabel)}</em></span><code>${escapeHtml(item.url_hint)}</code><small>${escapeHtml(deliveryCopy)}</small></div><div class="tracking-item-actions"><button type="button" data-pushcut-toggle>${item.active ? 'Pausar' : 'Ativar'}</button><button class="tracking-delete" type="button" data-pushcut-delete aria-label="Remover ${escapeHtml(item.name)}"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6"></path></svg></button></div></article>`;
+    }).join('') : '<p class="empty-state">Nenhum link cadastrado. Adicione um destino para começar a receber notificações.</p>';
+  };
+
   const boot = async () => {
     const session = await api.validSession();
     if (!session) return location.replace('login.html');
     try {
       const membership = await api.request(`/rest/v1/admin_users?user_id=eq.${encodeURIComponent(session.user.id)}&select=display_name,email`, {}, session.access_token);
       if (!membership?.length) throw new Error('Acesso administrativo não autorizado.');
-      const [orders, products, events, gatewayRows, primecashHealth, titansHealth, trackingResponse] = await Promise.all([
+      const [orders, products, events, gatewayRows, primecashHealth, titansHealth, trackingResponse, pushcutResponse] = await Promise.all([
         api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,addons,shipping_method,shipping_amount,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
         api.request('/rest/v1/products?select=id,title,variant_name,price,image_url,stock_quantity,active&active=eq.true&order=sort_order.asc', {}, session.access_token),
         api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token),
         api.request('/rest/v1/gateway_settings?select=provider,active,updated_at&order=provider.asc', {}, session.access_token),
         loadGatewayHealth(session, 'primecash'),
         loadGatewayHealth(session, 'titans'),
-        api.primecashRequest('/tracking', {}, session.access_token).catch(() => ({ integrations: [] }))
+        api.primecashRequest('/tracking', {}, session.access_token).catch(() => ({ integrations: [] })),
+        api.primecashRequest('/pushcut', {}, session.access_token).catch(() => ({ endpoints: [] }))
       ]);
       const displayName = membership[0].display_name || 'Administrador';
       document.querySelector('.admin-user strong').textContent = displayName;
@@ -400,6 +423,8 @@
       renderGateway();
       trackingIntegrations = trackingResponse.integrations || [];
       renderTracking();
+      pushcutEndpoints = pushcutResponse.endpoints || [];
+      renderPushcut();
     } catch (error) {
       showToast(error.message);
       if (error.message.includes('autorizado')) { api.saveSession(null); setTimeout(() => location.replace('login.html'), 1200); }
@@ -584,6 +609,75 @@
         trackingIntegrations = response.integrations || [];
         renderTracking();
         showToast(integration.active ? 'Integração pausada.' : 'Integração ativada.');
+      } catch (toggleError) { button.disabled = false; showToast(toggleError.message); }
+    }
+  });
+  document.querySelector('[data-pushcut-form]')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    const error = document.querySelector('[data-pushcut-form-error]');
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    error.textContent = '';
+    form.querySelectorAll('[aria-invalid="true"]').forEach((input) => input.removeAttribute('aria-invalid'));
+    const payload = {
+      eventType: form.elements.eventType.value,
+      name: form.elements.name.value.trim(),
+      url: form.elements.url.value.trim(),
+      active: form.elements.active.checked
+    };
+    const missing = ['name', 'url'].find((field) => !payload[field]);
+    if (missing) {
+      form.elements[missing].setAttribute('aria-invalid', 'true');
+      error.textContent = 'Preencha todos os campos obrigatórios.';
+      return form.elements[missing].focus();
+    }
+    submit.disabled = true;
+    submit.querySelector('span').textContent = 'Criptografando e salvando...';
+    try {
+      const response = await api.primecashRequest('/pushcut', { method: 'POST', body: JSON.stringify(payload) }, session.access_token);
+      pushcutEndpoints = response.endpoints || [];
+      renderPushcut();
+      form.reset();
+      form.elements.active.checked = true;
+      showToast('Link do PushCut adicionado com proteção contra duplicações.');
+    } catch (saveError) {
+      error.textContent = saveError.message;
+      form.elements.url.setAttribute('aria-invalid', 'true');
+      form.elements.url.focus();
+    } finally {
+      submit.disabled = false;
+      submit.querySelector('span').textContent = 'Adicionar link';
+    }
+  });
+  document.querySelector('[data-pushcut-list]')?.addEventListener('click', async (event) => {
+    const card = event.target.closest('[data-pushcut-id]');
+    const endpoint = pushcutEndpoints.find((item) => item.id === card?.dataset.pushcutId);
+    const button = event.target.closest('button');
+    if (!endpoint || !button) return;
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    if (button.matches('[data-pushcut-delete]')) {
+      if (!confirm(`Remover o link “${endpoint.name}”? Novos eventos deixarão de ser enviados para ele.`)) return;
+      button.disabled = true;
+      try {
+        await api.primecashRequest(`/pushcut?id=${encodeURIComponent(endpoint.id)}`, { method: 'DELETE' }, session.access_token);
+        pushcutEndpoints = pushcutEndpoints.filter((item) => item.id !== endpoint.id);
+        renderPushcut();
+        showToast('Link do PushCut removido.');
+      } catch (deleteError) { button.disabled = false; showToast(deleteError.message); }
+      return;
+    }
+    if (button.matches('[data-pushcut-toggle]')) {
+      button.disabled = true;
+      try {
+        const response = await api.primecashRequest('/pushcut', { method: 'PUT', body: JSON.stringify({
+          id: endpoint.id, name: endpoint.name, eventType: endpoint.event_type, active: !endpoint.active
+        }) }, session.access_token);
+        pushcutEndpoints = response.endpoints || [];
+        renderPushcut();
+        showToast(endpoint.active ? 'Notificações pausadas para este link.' : 'Notificações ativadas para este link.');
       } catch (toggleError) { button.disabled = false; showToast(toggleError.message); }
     }
   });

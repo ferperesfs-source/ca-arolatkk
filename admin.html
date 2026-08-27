@@ -18,7 +18,7 @@
 @media (max-width:430px){.metric-grid{grid-template-columns:1fr 1fr}.metric-card{min-width:0}.metric-icon{width:34px;height:34px}.metric-head{align-items:flex-start}.metric-head .trend{position:absolute;top:14px;right:12px}.metric-card>small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar-chart{height:210px;padding-inline:8px}.bar-chart i{width:70%}.showcase-metrics{grid-template-columns:1fr}.login-copy h1{font-size:34px}.demo-access{align-items:flex-start}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.bar-chart i{transition:none}}
 </style>
-  <link rel="stylesheet" href="admin.css?v=7">
+  <link rel="stylesheet" href="admin.css?v=8">
 </head>
 <body class="admin-page" data-page="admin">
   <div class="admin-layout">
@@ -34,6 +34,7 @@
         <a class="nav-item" href="#clientes" data-route="customers"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 1-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg><span>Clientes</span></a>
         <a class="nav-item" href="#gateways" data-route="gateways"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"></rect><path d="M3 10h18M7 15h3"></path></svg><span>Gateways</span></a>
         <a class="nav-item" href="#rastreamento" data-route="tracking"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-8M22 19H2"></path><circle cx="16" cy="7" r="3"></circle></svg><span>Rastreamento</span></a>
+        <a class="nav-item" href="#pushcut" data-route="pushcut"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg><span>PushCut</span></a>
       </nav>
       <div class="sidebar-bottom">
         <a class="nav-item" href="produto.html"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"></path><path d="M9 22V12h6v10"></path></svg><span>Ver loja</span></a>
@@ -207,11 +208,38 @@
             </section>
           </div>
         </section>
+
+        <section class="admin-view" data-view="pushcut" aria-labelledby="pushcut-heading" hidden>
+          <header class="page-heading"><div><p class="eyebrow">NOTIFICAÇÕES</p><h2 id="pushcut-heading">PushCut</h2><p>Receba alertas instantâneos de pedidos gerados e pagamentos confirmados, sem reenvios duplicados.</p></div></header>
+          <section class="tracking-summary pushcut-summary" aria-label="Resumo das notificações">
+            <article><span>Links ativos</span><strong data-pushcut-active>0</strong><small>Destinos protegidos no Vault</small></article>
+            <article><span>Pedidos gerados</span><strong data-pushcut-created>0</strong><small>Notificações entregues</small></article>
+            <article><span>Pedidos pagos</span><strong data-pushcut-paid>0</strong><small>Notificações entregues</small></article>
+          </section>
+          <div class="tracking-layout pushcut-layout">
+            <article class="panel tracking-form-card">
+              <div class="tracking-card-heading"><span class="metric-icon pink"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path><path d="M10 21h4"></path></svg></span><div><h3>Novo link</h3><p>Cadastre quantos destinos precisar para cada evento.</p></div></div>
+              <form class="tracking-form" data-pushcut-form novalidate>
+                <label><span>Quando enviar</span><select name="eventType" required><option value="order_created">Pedido gerado</option><option value="order_paid">Pedido pago</option></select><small>O pedido gerado dispara somente depois que o Pix for criado.</small></label>
+                <label><span>Nome do destino</span><input name="name" type="text" minlength="2" maxlength="80" autocomplete="off" placeholder="Ex.: iPhone do atendimento" required></label>
+                <label><span>URL da notificação</span><input name="url" type="password" minlength="30" maxlength="1000" inputmode="url" autocomplete="new-password" spellcheck="false" placeholder="https://api.pushcut.io/.../notifications/..." required><small>Copie a URL da notificação no app PushCut. Ela será criptografada e não aparecerá novamente.</small></label>
+                <label class="tracking-active"><input name="active" type="checkbox" checked><span aria-hidden="true"></span><b>Ativar após salvar</b></label>
+                <p class="tracking-form-error" data-pushcut-form-error role="alert"></p>
+                <button class="primary-button" type="submit"><span>Adicionar link</span></button>
+              </form>
+            </article>
+            <section class="panel tracking-list-card" aria-labelledby="pushcut-list-heading">
+              <header class="panel-header"><div><h3 id="pushcut-list-heading">Links configurados</h3><p>Cada pedido e destino possui uma chave única que bloqueia notificações repetidas.</p></div></header>
+              <div class="tracking-list" data-pushcut-list><p class="empty-state">Carregando links...</p></div>
+              <p class="tracking-security"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span>URLs criptografadas no Supabase Vault e entregas idempotentes por pedido.</span></p>
+            </section>
+          </div>
+        </section>
       </main>
     </div>
   </div>
   <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="supabase-config.js?v=6"></script>
-  <script src="admin.js?v=9"></script>
+  <script src="admin.js?v=10"></script>
 </body>
 </html>

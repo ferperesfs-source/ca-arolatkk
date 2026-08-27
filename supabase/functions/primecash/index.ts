@@ -9,6 +9,8 @@ const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/primecash`;
 type Provider = "primecash" | "titans";
 type MarketingProvider = "google" | "meta" | "tiktok";
 type MarketingIntegration = { id: string; provider: MarketingProvider; name: string; tracking_id: string; active: boolean };
+type PushcutEvent = "order_created" | "order_paid";
+type PushcutEndpoint = { id: string; name: string; event_type: PushcutEvent; url_hint: string; active: boolean };
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
@@ -225,6 +227,161 @@ const sha256 = async (value: unknown) => {
 const deterministicClientId = async (orderId: number) => {
   const digest = new DataView(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`order:${orderId}`)));
   return `${digest.getUint32(0) || 1}.${digest.getUint32(4) || 1}`;
+};
+
+const sha256Exact = async (value: string) => {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+
+const normalizePushcutUrl = (value: unknown) => {
+  const raw = String(value || "").trim();
+  if (raw.length < 30 || raw.length > 1000) throw Object.assign(new Error("Cole uma URL de notificação válida do PushCut."), { status: 400 });
+  let url: URL;
+  try { url = new URL(raw); }
+  catch { throw Object.assign(new Error("A URL do PushCut está incompleta ou inválida."), { status: 400 }); }
+  const segments = url.pathname.split("/").filter(Boolean);
+  const valid = url.protocol === "https:" && url.hostname === "api.pushcut.io" && !url.port && !url.username && !url.password
+    && !url.search && !url.hash && segments.length === 3 && segments[1] === "notifications"
+    && segments[0].length >= 8 && segments[0].length <= 300 && segments[2].length >= 1 && segments[2].length <= 300;
+  if (!valid) throw Object.assign(new Error("Use a URL oficial copiada do PushCut: api.pushcut.io/.../notifications/...."), { status: 400 });
+  return url.toString();
+};
+
+const readPushcutEndpoints = async () => {
+  const { data, error } = await supabase.from("pushcut_endpoints")
+    .select("id,name,event_type,url_hint,active,created_at,updated_at").order("created_at", { ascending: true }).limit(100);
+  if (error) throw error;
+  const { data: deliveries, error: deliveryError } = await supabase.from("pushcut_deliveries")
+    .select("endpoint_id,event_type,status").order("created_at", { ascending: false }).limit(10000);
+  if (deliveryError) throw deliveryError;
+  const stats = new Map<string, { delivered: number; failed: number; processing: number }>();
+  for (const row of deliveries || []) {
+    const current = stats.get(row.endpoint_id) || { delivered: 0, failed: 0, processing: 0 };
+    if (row.status === "delivered") current.delivered += 1;
+    if (row.status === "failed") current.failed += 1;
+    if (row.status === "processing") current.processing += 1;
+    stats.set(row.endpoint_id, current);
+  }
+  return await Promise.all((data || []).map(async (endpoint) => {
+    const { data: secret, error: secretError } = await supabase.rpc("get_pushcut_url", { p_endpoint_id: endpoint.id });
+    if (secretError) throw secretError;
+    return { ...endpoint, configured: Boolean(secret), deliveries: stats.get(endpoint.id) || { delivered: 0, failed: 0, processing: 0 } };
+  }));
+};
+
+const handlePushcut = async (req: Request, url: URL) => {
+  await requireAdmin(req);
+  if (req.method === "GET") return json({ endpoints: await readPushcutEndpoints() });
+  if (req.method === "DELETE") {
+    const id = url.searchParams.get("id") || "";
+    if (!/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Destino do PushCut inválido." }, 400);
+    const { error } = await supabase.from("pushcut_endpoints").delete().eq("id", id);
+    if (error) throw error;
+    const { error: secretError } = await supabase.rpc("delete_pushcut_url", { p_endpoint_id: id });
+    if (secretError) throw secretError;
+    return json({ deleted: true });
+  }
+  if (!["POST", "PUT"].includes(req.method)) return json({ error: "Método não permitido." }, 405);
+  const body = await parseJson(req) as Record<string, unknown>;
+  const id = String(body.id || "");
+  const name = String(body.name || "").trim().slice(0, 80);
+  const eventType = String(body.eventType || "") as PushcutEvent;
+  const active = body.active !== false;
+  const suppliedUrl = String(body.url || "").trim();
+  if (name.length < 2) return json({ error: "Informe um nome para identificar o destino." }, 400);
+  if (!["order_created", "order_paid"].includes(eventType)) return json({ error: "Selecione quando a notificação será enviada." }, 400);
+  if (req.method === "PUT" && !/^[0-9a-f-]{36}$/i.test(id)) return json({ error: "Destino do PushCut inválido." }, 400);
+  if (req.method === "POST" && !suppliedUrl) return json({ error: "Cole a URL da notificação do PushCut." }, 400);
+  const normalizedUrl = suppliedUrl ? normalizePushcutUrl(suppliedUrl) : "";
+  const values: Record<string, unknown> = { name, event_type: eventType, active, updated_at: new Date().toISOString() };
+  if (normalizedUrl) values.url_fingerprint = await sha256Exact(normalizedUrl);
+  if (req.method === "POST") values.url_hint = "api.pushcut.io/••••••/notifications/••••••";
+  const query = req.method === "PUT"
+    ? supabase.from("pushcut_endpoints").update(values).eq("id", id).select("id").single()
+    : supabase.from("pushcut_endpoints").insert(values).select("id").single();
+  const { data: endpoint, error } = await query;
+  if (error?.code === "23505") return json({ error: "Este link já está cadastrado para o mesmo evento." }, 409);
+  if (error || !endpoint) throw error || new Error("Não foi possível salvar o destino.");
+  if (normalizedUrl) {
+    const { error: secretError } = await supabase.rpc("set_pushcut_url", { p_endpoint_id: endpoint.id, p_url: normalizedUrl });
+    if (secretError) {
+      if (req.method === "POST") await supabase.from("pushcut_endpoints").delete().eq("id", endpoint.id);
+      throw secretError;
+    }
+  }
+  return json({ saved: true, endpoints: await readPushcutEndpoints() });
+};
+
+const postPushcut = async (destination: string, payload: Record<string, unknown>) => {
+  let lastError: unknown = new Error("O PushCut não respondeu.");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(destination, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (response.ok) return response.status;
+      const detail = (await response.text()).slice(0, 180);
+      const retryable = response.status === 429 || response.status >= 500;
+      lastError = Object.assign(new Error(detail || `HTTP ${response.status}`), { responseStatus: response.status });
+      if (!retryable) throw lastError;
+    } catch (error) {
+      lastError = error;
+      if (Number((error as any)?.responseStatus) > 0 && Number((error as any).responseStatus) < 500 && Number((error as any).responseStatus) !== 429) throw error;
+    }
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 350 * (2 ** attempt)));
+  }
+  throw lastError;
+};
+
+const dispatchPushcutEvent = async (orderId: number, eventType: PushcutEvent) => {
+  const { data: order, error: orderError } = await supabase.from("orders")
+    .select("id,amount,currency,status,gateway_checkout_id,items,addons").eq("id", orderId).single();
+  if (orderError || !order) return;
+  if (eventType === "order_paid" && order.status !== "paid") return;
+  if (eventType === "order_created" && (!order.gateway_checkout_id || order.status === "cancelled")) return;
+  const { data: endpoints, error } = await supabase.from("pushcut_endpoints")
+    .select("id,name,event_type,url_hint,active").eq("active", true).eq("event_type", eventType).limit(50);
+  if (error) throw error;
+  await Promise.allSettled((endpoints || []).map(async (endpoint: PushcutEndpoint) => {
+    const { data: deliveryId, error: claimError } = await supabase.rpc("claim_pushcut_delivery", {
+      p_order_id: order.id, p_endpoint_id: endpoint.id, p_event_type: eventType,
+    });
+    if (claimError) throw claimError;
+    if (!deliveryId) return;
+    try {
+      const { data: destination, error: secretError } = await supabase.rpc("get_pushcut_url", { p_endpoint_id: endpoint.id });
+      if (secretError || !destination) throw secretError || new Error("URL do PushCut não configurada.");
+      const totalItems = [...(Array.isArray(order.items) ? order.items : []), ...(Array.isArray(order.addons) ? order.addons : [])]
+        .reduce((sum: number, item: any) => sum + Number(item.quantity || 1), 0);
+      const formattedAmount = Number(order.amount || 0).toLocaleString("pt-BR", { style: "currency", currency: order.currency || "BRL" });
+      const paid = eventType === "order_paid";
+      const eventId = `pc_${paid ? "paid" : "created"}_${order.id}_${endpoint.id.slice(0, 8)}`;
+      const responseStatus = await postPushcut(destination, {
+          title: paid ? "Pagamento aprovado" : "Novo pedido gerado",
+          text: `Pedido #CLX-${String(order.id).padStart(4, "0")} · ${formattedAmount} · ${totalItems} item${totalItems === 1 ? "" : "s"}${paid ? " · pagamento confirmado" : " · aguardando pagamento"}`,
+          input: JSON.stringify({ orderId: order.id, event: eventType, amount: Number(order.amount || 0) }),
+          id: eventId,
+          threadId: "pedidos",
+          isTimeSensitive: paid,
+          sound: paid ? "jobDone" : "system",
+      });
+      await supabase.from("pushcut_deliveries").update({
+        status: "delivered", response_status: responseStatus, last_error: null,
+        delivered_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      }).eq("id", deliveryId);
+    } catch (deliveryError) {
+      const safeError = deliveryError instanceof Error ? deliveryError.message.slice(0, 240) : "Falha ao enviar notificação.";
+      await supabase.from("pushcut_deliveries").update({
+        status: "failed", response_status: Number((deliveryError as any)?.responseStatus) || null,
+        last_error: safeError, updated_at: new Date().toISOString(),
+      }).eq("id", deliveryId);
+      console.warn("PushCut delivery failed:", eventType, endpoint.id, safeError);
+    }
+  }));
 };
 
 const trackedItems = (items: any[]) => (Array.isArray(items) ? items : []).map((item) => ({
@@ -469,6 +626,9 @@ const handleCheckout = async (req: Request) => {
       gateway_checkout_id: String(transaction.id), gateway_status: String(transaction.status || "pending").toLowerCase(), updated_at: new Date().toISOString(),
     }).eq("id", order.id);
     if (updateError) throw updateError;
+    EdgeRuntime.waitUntil(dispatchPushcutEvent(Number(order.id), "order_created").catch((notificationError) => {
+      console.warn("PushCut order-created dispatch failed:", notificationError instanceof Error ? notificationError.message : notificationError);
+    }));
     return json({
       orderId: order.id,
       status: String(transaction.status || "pending").toLowerCase(),
@@ -520,7 +680,9 @@ const handleWebhook = async (req: Request, url: URL) => {
   }
   const { error } = await supabase.from("orders").update(update).eq("id", order.id);
   if (error) throw error;
-  if (update.status === "paid") await dispatchPaidOrder(Number(order.id));
+  if (update.status === "paid") EdgeRuntime.waitUntil(Promise.allSettled([
+    dispatchPaidOrder(Number(order.id)), dispatchPushcutEvent(Number(order.id), "order_paid"),
+  ]));
   return json({ received: true });
 };
 
@@ -532,6 +694,7 @@ Deno.serve(async (req) => {
     if (action === "status") return await handleStatus(req, url);
     if (action === "credentials") return await handleCredentials(req, url);
     if (action === "tracking") return await handleTracking(req, url);
+    if (action === "pushcut") return await handlePushcut(req, url);
     if (action === "checkout") return await handleCheckout(req);
     if (action === "webhook") return await handleWebhook(req, url);
     return json({ error: "Rota não encontrada." }, 404);
