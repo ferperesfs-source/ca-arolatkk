@@ -1,6 +1,7 @@
 (() => {
   const url = 'https://futysxjtptcsahgyrpci.supabase.co';
   const publishableKey = 'sb_publishable_5ZHATfufgFDbhiJnFBp4ig_xaxf-1Oq';
+  const primecashFunctionUrl = `${url}/functions/v1/primecash`;
   const sessionKey = 'cacarolaAdminSession';
 
   const request = async (path, options = {}, accessToken = '') => {
@@ -71,5 +72,21 @@
     })
   }).catch(() => null);
 
-  window.CacarolaSupabase = { url, publishableKey, request, getSession, saveSession, validSession, track };
+  const primecashRequest = async (path, options = {}, accessToken = '') => {
+    const response = await fetch(`${primecashFunctionUrl}${path}`, {
+      ...options,
+      headers: {
+        apikey: publishableKey,
+        'Content-Type': 'application/json',
+        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        ...(options.headers || {})
+      }
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!response.ok) throw new Error(data?.error || 'Não foi possível concluir a operação.');
+    return data;
+  };
+
+  window.CacarolaSupabase = { url, publishableKey, request, primecashRequest, getSession, saveSession, validSession, track };
 })();

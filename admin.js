@@ -270,20 +270,18 @@
       state.innerHTML = `<i></i> ${healthy ? 'Ativo' : active ? 'Requer configuração' : 'Inativo'}`;
     }
     document.querySelector('[data-gateway-health]').textContent = healthy ? 'Operacional' : active ? 'Configuração pendente' : 'Desativado';
-    document.querySelector('[data-gateway-credentials]').textContent = configured ? 'Configuradas na Vercel' : 'Não configuradas';
+    document.querySelector('[data-gateway-credentials]').textContent = configured ? 'Protegida no Supabase Vault' : 'Não configuradas';
     notice.className = `gateway-notice ${healthy ? 'is-success' : active ? 'is-error' : ''}`;
     notice.textContent = healthy
       ? 'PrimeCash está ativa. O checkout já pode criar pagamentos reais.'
       : active
-        ? 'Adicione as duas variáveis secretas na Vercel para liberar o checkout.'
+        ? 'Cadastre a Secret Key da PrimeCash ao lado para liberar o checkout.'
         : 'Ative este gateway para usá-lo nas novas compras.';
   };
 
   const loadGatewayHealth = async (session) => {
     try {
-      const response = await fetch('/api/primecash-status', { headers: { Authorization: `Bearer ${session.access_token}` } });
-      const data = await response.json();
-      return response.ok ? data : { configured: false };
+      return await api.primecashRequest('/status', {}, session.access_token);
     } catch { return { configured: false }; }
   };
 
@@ -354,16 +352,61 @@
     }
   });
   document.querySelector('[data-test-gateway]')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
     const session = await api.validSession();
     if (!session) return location.replace('login.html');
-    event.currentTarget.disabled = true;
-    event.currentTarget.textContent = 'Testando...';
-    const health = await loadGatewayHealth(session);
+    button.disabled = true;
+    button.textContent = 'Testando...';
+    const health = await api.primecashRequest('/status?probe=1', {}, session.access_token).catch(() => ({ configured: false, reachable: false }));
     const rows = await api.request('/rest/v1/gateway_settings?provider=eq.primecash&select=active', {}, session.access_token).catch(() => []);
     renderGateway(rows[0] || { active: false }, health);
-    showToast(health.configured ? 'Credenciais seguras encontradas.' : 'Credenciais ainda não configuradas na Vercel.');
-    event.currentTarget.disabled = false;
-    event.currentTarget.textContent = 'Testar conexão';
+    showToast(health.reachable ? 'Conexão com a PrimeCash confirmada.' : health.configured ? 'Chave salva, mas a conexão não respondeu.' : 'Cadastre a Secret Key da PrimeCash.');
+    button.disabled = false;
+    button.textContent = 'Testar conexão';
+  });
+  document.querySelector('[data-toggle-gateway-key]')?.addEventListener('click', (event) => {
+    const input = document.querySelector('#primecash-secret-key');
+    const visible = input.type === 'text';
+    input.type = visible ? 'password' : 'text';
+    event.currentTarget.setAttribute('aria-pressed', String(!visible));
+    event.currentTarget.setAttribute('aria-label', visible ? 'Mostrar chave' : 'Ocultar chave');
+  });
+  document.querySelector('[data-gateway-key-form]')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const input = form.elements.secretKey;
+    const submit = form.querySelector('[type="submit"]');
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    const error = document.querySelector('#primecash-key-error');
+    const inputWrap = input.closest('.gateway-key-input');
+    const secretKey = input.value.trim();
+    error.textContent = '';
+    inputWrap.classList.remove('has-error');
+    input.removeAttribute('aria-invalid');
+    if (secretKey.length < 12) {
+      error.textContent = 'Cole uma Secret Key válida com pelo menos 12 caracteres.';
+      inputWrap.classList.add('has-error');
+      input.setAttribute('aria-invalid', 'true');
+      return input.focus();
+    }
+    submit.disabled = true;
+    submit.querySelector('span').textContent = 'Validando e salvando...';
+    try {
+      const health = await api.primecashRequest('/credentials', { method: 'PUT', body: JSON.stringify({ secretKey }) }, session.access_token);
+      input.value = '';
+      input.type = 'password';
+      renderGateway({ active: document.querySelector('[data-gateway-toggle]').checked }, health);
+      showToast('Secret Key salva com criptografia no Supabase Vault.');
+    } catch (saveError) {
+      error.textContent = saveError.message;
+      inputWrap.classList.add('has-error');
+      input.setAttribute('aria-invalid', 'true');
+      input.focus();
+    } finally {
+      submit.disabled = false;
+      submit.querySelector('span').textContent = 'Salvar chave com segurança';
+    }
   });
   document.querySelector('.global-search input')?.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;

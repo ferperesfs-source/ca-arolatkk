@@ -137,7 +137,7 @@
                 <p>Pix e cartão com redirecionamento seguro, atualização automática do pagamento e valores conferidos no servidor.</p>
               </div>
               <dl class="gateway-details">
-                <div><dt>Autenticação</dt><dd>Chave secreta na Vercel</dd></div>
+                <div><dt>Autenticação</dt><dd>Chave criptografada no Supabase Vault</dd></div>
                 <div><dt>Postback</dt><dd>Validação server-to-server</dd></div>
                 <div><dt>Credenciais</dt><dd data-gateway-credentials>Verificando...</dd></div>
               </dl>
@@ -148,11 +148,20 @@
               <p class="gateway-notice" data-gateway-notice>Consultando a configuração segura...</p>
             </article>
             <aside class="panel gateway-help">
-              <span class="metric-icon amber"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"></path><path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path></svg></span>
-              <h3>Configuração segura</h3>
-              <p>A chave da PrimeCash nunca é exibida nem salva no navegador. Cadastre as variáveis abaixo nas configurações do projeto na Vercel.</p>
-              <code>PRIMECASH_SECRET_KEY</code>
-              <code>SUPABASE_SERVICE_ROLE_KEY</code>
+              <span class="metric-icon amber"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span>
+              <h3>Credenciais da PrimeCash</h3>
+              <p>A chave é enviada diretamente à função segura e armazenada criptografada. Depois de salva, ela nunca é exibida novamente.</p>
+              <form class="gateway-key-form" data-gateway-key-form novalidate>
+                <label for="primecash-secret-key">Secret Key <span>obrigatória</span></label>
+                <div class="gateway-key-input">
+                  <input id="primecash-secret-key" name="secretKey" type="password" minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Cole a Secret Key da PrimeCash" aria-describedby="primecash-key-help primecash-key-error">
+                  <button type="button" data-toggle-gateway-key aria-label="Mostrar chave" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+                </div>
+                <small id="primecash-key-help">Encontre a chave em Configurações → Credenciais de API no painel PrimeCash.</small>
+                <span class="gateway-key-error" id="primecash-key-error" role="alert"></span>
+                <button class="primary-button gateway-save-key" type="submit"><span>Salvar chave com segurança</span></button>
+              </form>
+              <div class="gateway-security-note"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span>Protegida pelo Supabase Vault</span></div>
               <a href="https://primecashbrasil.readme.io/reference/introducao" target="_blank" rel="noopener noreferrer">Abrir documentação oficial</a>
             </aside>
           </section>
@@ -162,6 +171,6 @@
   </div>
   <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="supabase-config.js?v=1"></script>
-  <script src="admin.js?v=4"></script>
+  <script src="admin.js?v=6"></script>
 </body>
 </html>

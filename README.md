@@ -21,18 +21,12 @@ O projeto usa o Supabase `cacarola-prod` para autenticação administrativa, cat
 
 ## PrimeCash
 
-O painel possui a rota `#gateways`, onde o administrador ativa ou desativa a PrimeCash. A integração usa o checkout hospedado oficial com Pix e cartão. O postback consulta novamente a PrimeCash antes de atualizar o status do pedido no Supabase.
+O painel possui a rota `#gateways`, onde o administrador ativa ou desativa a PrimeCash e cadastra a Secret Key. A chave é validada pela função segura, armazenada criptografada no Supabase Vault e nunca é devolvida ao navegador. A integração usa o checkout hospedado oficial com Pix e cartão. O postback consulta novamente a PrimeCash antes de atualizar o status do pedido no Supabase.
 
-Cadastre estas variáveis no projeto da Vercel:
-
-- `PRIMECASH_SECRET_KEY` — chave secreta obtida no painel da PrimeCash.
-- `SUPABASE_SERVICE_ROLE_KEY` — chave secreta do projeto Supabase.
-- `PUBLIC_SITE_URL` — domínio público da loja, por exemplo `https://seu-dominio.com.br`.
-
-As variáveis opcionais `SUPABASE_URL` e `SUPABASE_PUBLISHABLE_KEY` já possuem os valores públicos deste projeto como fallback. Nunca adicione valores secretos ao repositório; use `.env.example` apenas como referência.
+O processamento fica na Edge Function `primecash`, que usa as credenciais administrativas fornecidas automaticamente pelo próprio Supabase. Não é necessário cadastrar chaves da PrimeCash ou do Supabase na Vercel.
 
 Credenciais, chaves secretas e tokens de gerenciamento não devem ser adicionados ao Git. A chave presente no cliente é apenas a chave publicável do projeto.
 
 ## Deploy na Vercel
 
-Importe este repositório na Vercel como um projeto sem framework. Não é necessário comando de build nem diretório de saída: os arquivos estáticos são servidos da raiz e as funções em `api/` são publicadas automaticamente.
+Importe este repositório na Vercel como um projeto sem framework. Não é necessário comando de build nem diretório de saída: os arquivos estáticos são servidos diretamente da raiz.

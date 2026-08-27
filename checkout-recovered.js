@@ -155,9 +155,8 @@
     checkoutButton.textContent = 'ABRINDO PAGAMENTO...';
     try {
       await api?.track('checkout_started', { item_count: items.reduce((sum, item) => sum + item.qty, 0) });
-      const response = await fetch('/api/primecash-checkout', {
+      const data = await api.primecashRequest('/checkout', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customer: { name: customerName, email, phone: phoneDigits, taxId: taxDigits },
           items: items.map((item) => ({
@@ -166,8 +165,7 @@
           }))
         })
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.secureUrl) throw new Error(data.error || 'Não foi possível abrir o pagamento.');
+      if (!data.secureUrl) throw new Error('Não foi possível abrir o pagamento.');
       showFormMessage('Pedido criado. Redirecionando para o pagamento seguro...');
       checkoutButton.textContent = 'REDIRECIONANDO...';
       location.assign(data.secureUrl);
