@@ -348,7 +348,7 @@
       if (!data.pixCode || !data.qrCodeImage) throw new Error('Não foi possível gerar o Pix.');
       renderPixPayment(data);
     } catch (error) {
-      const customerMessage = /gateway|primecash|administrador|configurad|desativad/i.test(error.message)
+      const customerMessage = /gateway|primecash|titans|provedor|administrador|configurad|desativad/i.test(error.message)
         ? 'Pagamento temporariamente indisponível. Tente novamente mais tarde.'
         : error.message;
       showFormMessage(customerMessage, true);

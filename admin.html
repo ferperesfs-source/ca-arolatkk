@@ -18,7 +18,7 @@
 @media (max-width:430px){.metric-grid{grid-template-columns:1fr 1fr}.metric-card{min-width:0}.metric-icon{width:34px;height:34px}.metric-head{align-items:flex-start}.metric-head .trend{position:absolute;top:14px;right:12px}.metric-card>small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.bar-chart{height:210px;padding-inline:8px}.bar-chart i{width:70%}.showcase-metrics{grid-template-columns:1fr}.login-copy h1{font-size:34px}.demo-access{align-items:flex-start}}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}.bar-chart i{transition:none}}
 </style>
-  <link rel="stylesheet" href="admin.css?v=5">
+  <link rel="stylesheet" href="admin.css?v=6">
 </head>
 <body class="admin-page" data-page="admin">
   <div class="admin-layout">
@@ -120,15 +120,25 @@
 
         <section class="admin-view" data-view="gateways" aria-labelledby="gateways-heading" hidden>
           <header class="page-heading"><div><p class="eyebrow">PAGAMENTOS</p><h2 id="gateways-heading">Gateways</h2><p>Defina o provedor usado no checkout e acompanhe a integridade da conexão.</p></div></header>
+          <div class="gateway-provider-picker" role="tablist" aria-label="Gateways disponíveis">
+            <button class="gateway-provider-option is-selected" type="button" role="tab" aria-selected="true" data-gateway-provider="primecash">
+              <span class="gateway-provider-logo"><img src="assets/gateways/primecash-logo.png" alt=""></span>
+              <span><strong>PrimeCash Brasil</strong><small data-provider-state="primecash">Verificando...</small></span><i aria-hidden="true"></i>
+            </button>
+            <button class="gateway-provider-option" type="button" role="tab" aria-selected="false" data-gateway-provider="titans">
+              <span class="gateway-provider-logo"><img src="assets/gateways/titans-logo.avif" alt=""></span>
+              <span><strong>Titans Gateway</strong><small data-provider-state="titans">Verificando...</small></span><i aria-hidden="true"></i>
+            </button>
+          </div>
           <article class="panel gateway-card gateway-card-unified" data-gateway-card>
             <header class="gateway-card-head">
-              <span class="gateway-logo"><img src="assets/gateways/primecash-logo.png" alt="PrimeCash"></span>
+              <span class="gateway-logo"><img src="assets/gateways/primecash-logo.png" alt="PrimeCash" data-gateway-logo></span>
               <span class="gateway-state is-checking" data-gateway-state><i></i> Verificando</span>
             </header>
             <div class="gateway-card-copy">
               <span class="eyebrow">PIX VIA API</span>
-              <h3>PrimeCash Brasil</h3>
-              <p>Os dados do pedido são validados no servidor e enviados para gerar o QR Code Pix diretamente no checkout.</p>
+              <h3 data-gateway-title>PrimeCash Brasil</h3>
+              <p data-gateway-description>Os dados do pedido são validados no servidor e enviados para gerar o QR Code Pix diretamente no checkout.</p>
             </div>
             <section class="gateway-quick-status" aria-label="Resumo da integração">
               <div><span>Gateway</span><strong data-gateway-name>PrimeCash</strong></div>
@@ -136,7 +146,7 @@
               <div><span>Conexão</span><strong data-gateway-health>Verificando...</strong></div>
             </section>
             <dl class="gateway-details">
-              <div><dt>Autenticação</dt><dd>Basic Auth com chave protegida</dd></div>
+              <div><dt>Autenticação</dt><dd data-gateway-auth>Basic Auth com chave protegida</dd></div>
               <div><dt>Pagamento</dt><dd>Pix com QR Code no checkout</dd></div>
               <div><dt>Credenciais</dt><dd data-gateway-credentials>Verificando...</dd></div>
             </dl>
@@ -151,14 +161,19 @@
                 <div><h4>Credenciais</h4><p>A chave é validada pela API e armazenada criptografada. Depois de salva, nunca é exibida novamente.</p></div>
               </div>
               <form class="gateway-key-form" data-gateway-key-form novalidate>
-                <label for="primecash-secret-key">Secret Key <span>obrigatória</span></label>
+                <label for="gateway-secret-key"><span data-gateway-key-label>Secret Key</span> <span>obrigatória</span></label>
                 <div class="gateway-key-input">
-                  <input id="primecash-secret-key" name="secretKey" type="password" minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Cole a Secret Key da PrimeCash" aria-describedby="primecash-key-help primecash-key-error">
+                  <input id="gateway-secret-key" name="secretKey" type="password" minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Cole a Secret Key da PrimeCash" aria-describedby="gateway-key-help gateway-key-error">
                   <button type="button" data-toggle-gateway-key aria-label="Mostrar chave" aria-pressed="false"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
                 </div>
-                <small id="primecash-key-help">Use a Secret Key de Configurações → Credenciais de API.</small>
-                <span class="gateway-key-error" id="primecash-key-error" role="alert"></span>
-                <div class="gateway-key-actions"><button class="primary-button gateway-save-key" type="submit"><span>Salvar chave</span></button><a href="https://primecashbrasil.readme.io/reference/introducao" target="_blank" rel="noopener noreferrer">Documentação oficial</a></div>
+                <small id="gateway-key-help" data-gateway-key-help>Use a Secret Key de Configurações → Credenciais de API.</small>
+                <div class="gateway-optional-key" data-titans-webhook-field hidden>
+                  <label for="titans-webhook-secret">Webhook Secret <span>opcional</span></label>
+                  <div class="gateway-key-input"><input id="titans-webhook-secret" name="webhookSecret" type="password" minlength="12" maxlength="500" autocomplete="off" spellcheck="false" placeholder="Assinatura HMAC dos webhooks"></div>
+                  <small>Recomendado para validar o cabeçalho X-Signature dos eventos de pagamento.</small>
+                </div>
+                <span class="gateway-key-error" id="gateway-key-error" role="alert"></span>
+                <div class="gateway-key-actions"><button class="primary-button gateway-save-key" type="submit"><span>Salvar chave</span></button><a href="https://primecashbrasil.readme.io/reference/introducao" target="_blank" rel="noopener noreferrer" data-gateway-docs>Documentação oficial</a></div>
               </form>
               <div class="gateway-security-note"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span>Protegida pelo Supabase Vault</span></div>
             </section>
@@ -169,6 +184,6 @@
   </div>
   <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   <script src="supabase-config.js?v=6"></script>
-  <script src="admin.js?v=7"></script>
+  <script src="admin.js?v=8"></script>
 </body>
 </html>

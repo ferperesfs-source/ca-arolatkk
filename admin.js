@@ -78,6 +78,23 @@
 
   let cachedOrders = [];
   let cachedCustomers = [];
+  let selectedGateway = 'primecash';
+  let gatewaySettings = {};
+  let gatewayHealth = {};
+  const gatewayCatalog = {
+    primecash: {
+      name: 'PrimeCash Brasil', shortName: 'PrimeCash', logo: 'assets/gateways/primecash-logo.png',
+      auth: 'Basic Auth com chave protegida', keyLabel: 'Secret Key', placeholder: 'Cole a Secret Key da PrimeCash',
+      help: 'Use a Secret Key de Configurações → Credenciais de API.', docs: 'https://primecashbrasil.readme.io/reference/introducao',
+      description: 'Os dados do pedido são validados no servidor e enviados para gerar o QR Code Pix diretamente no checkout.'
+    },
+    titans: {
+      name: 'Titans Gateway', shortName: 'Titans', logo: 'assets/gateways/titans-logo.avif',
+      auth: 'Bearer Token com API Key protegida', keyLabel: 'API Key', placeholder: 'Cole a chave de pagamentos da Titans',
+      help: 'Use a chave de pagamentos em Financeiro → Integrações. Não use a chave de saque ou tokenização.', docs: 'https://app.titansgateway.net/docs/introduction/start',
+      description: 'Pagamentos Pix criados pela API oficial, com código copia e cola exibido diretamente no checkout e status atualizado por webhook.'
+    }
+  };
 
   const routeConfig = {
     '#visao-geral': { view: 'overview', title: 'Visão geral', search: 'Buscar pedido, cliente...' },
@@ -257,13 +274,28 @@
     showToast('Relatório de clientes exportado.');
   };
 
-  const renderGateway = (settings = {}, health = {}) => {
+  const renderGateway = () => {
+    const provider = selectedGateway;
+    const meta = gatewayCatalog[provider];
+    const settings = gatewaySettings[provider] || {};
+    const health = gatewayHealth[provider] || {};
     const active = Boolean(settings.active);
     const configured = Boolean(health.configured);
     const state = document.querySelector('[data-gateway-state]');
     const toggle = document.querySelector('[data-gateway-toggle]');
     const notice = document.querySelector('[data-gateway-notice]');
     const healthy = active && configured;
+    document.querySelector('[data-gateway-logo]').src = meta.logo;
+    document.querySelector('[data-gateway-logo]').alt = meta.shortName;
+    document.querySelector('[data-gateway-title]').textContent = meta.name;
+    document.querySelector('[data-gateway-description]').textContent = meta.description;
+    document.querySelector('[data-gateway-name]').textContent = meta.shortName;
+    document.querySelector('[data-gateway-auth]').textContent = meta.auth;
+    document.querySelector('[data-gateway-key-label]').textContent = meta.keyLabel;
+    document.querySelector('[data-gateway-key-help]').textContent = meta.help;
+    document.querySelector('#gateway-secret-key').placeholder = meta.placeholder;
+    document.querySelector('[data-gateway-docs]').href = meta.docs;
+    document.querySelector('[data-titans-webhook-field]').hidden = provider !== 'titans';
     if (toggle) { toggle.checked = active; toggle.disabled = false; }
     if (state) {
       state.className = `gateway-state ${healthy ? 'is-active' : active ? 'is-error' : 'is-inactive'}`;
@@ -273,15 +305,27 @@
     document.querySelector('[data-gateway-credentials]').textContent = configured ? 'Protegida no Supabase Vault' : 'Não configuradas';
     notice.className = `gateway-notice ${healthy ? 'is-success' : active ? 'is-error' : ''}`;
     notice.textContent = healthy
-      ? 'PrimeCash está ativa. O checkout já pode criar pagamentos reais.'
+      ? `${meta.shortName} está ativa. O checkout já pode criar pagamentos reais.`
       : active
-        ? 'Cadastre a Secret Key abaixo para liberar o checkout.'
+        ? `Cadastre a ${meta.keyLabel} abaixo para liberar o checkout.`
         : 'Ative este gateway para usá-lo nas novas compras.';
+    document.querySelectorAll('[data-gateway-provider]').forEach((button) => {
+      const key = button.dataset.gatewayProvider;
+      const keySettings = gatewaySettings[key] || {};
+      const keyHealth = gatewayHealth[key] || {};
+      const selected = key === provider;
+      button.classList.toggle('is-selected', selected);
+      button.classList.toggle('is-active', Boolean(keySettings.active && keyHealth.configured));
+      button.classList.toggle('is-error', Boolean(keySettings.active && !keyHealth.configured));
+      button.setAttribute('aria-selected', String(selected));
+      const label = document.querySelector(`[data-provider-state="${key}"]`);
+      if (label) label.textContent = keySettings.active ? (keyHealth.configured ? 'Ativo no checkout' : 'Requer configuração') : (keyHealth.configured ? 'Configurado' : 'Não configurado');
+    });
   };
 
-  const loadGatewayHealth = async (session) => {
+  const loadGatewayHealth = async (session, provider) => {
     try {
-      return await api.primecashRequest('/status', {}, session.access_token);
+      return await api.primecashRequest(`/status?provider=${encodeURIComponent(provider)}`, {}, session.access_token);
     } catch { return { configured: false }; }
   };
 
@@ -291,12 +335,13 @@
     try {
       const membership = await api.request(`/rest/v1/admin_users?user_id=eq.${encodeURIComponent(session.user.id)}&select=display_name,email`, {}, session.access_token);
       if (!membership?.length) throw new Error('Acesso administrativo não autorizado.');
-      const [orders, products, events, gatewayRows, gatewayHealth] = await Promise.all([
+      const [orders, products, events, gatewayRows, primecashHealth, titansHealth] = await Promise.all([
         api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
         api.request('/rest/v1/products?select=id,title,variant_name,price,image_url,stock_quantity,active&active=eq.true&order=sort_order.asc', {}, session.access_token),
         api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token),
-        api.request('/rest/v1/gateway_settings?provider=eq.primecash&select=provider,active,updated_at', {}, session.access_token),
-        loadGatewayHealth(session)
+        api.request('/rest/v1/gateway_settings?select=provider,active,updated_at&order=provider.asc', {}, session.access_token),
+        loadGatewayHealth(session, 'primecash'),
+        loadGatewayHealth(session, 'titans')
       ]);
       const displayName = membership[0].display_name || 'Administrador';
       document.querySelector('.admin-user strong').textContent = displayName;
@@ -306,7 +351,10 @@
       document.querySelector('[data-view="overview"] .eyebrow').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date()).toLocaleUpperCase('pt-BR');
       cachedOrders = orders;
       renderOrders(orders); renderProducts(products); renderCustomers(orders); renderActivity(orders); renderMetrics(orders, events);
-      renderGateway(gatewayRows[0] || { active: true }, gatewayHealth);
+      gatewaySettings = Object.fromEntries(gatewayRows.map((row) => [row.provider, row]));
+      gatewayHealth = { primecash: primecashHealth, titans: titansHealth };
+      selectedGateway = gatewayRows.find((row) => row.active)?.provider || 'primecash';
+      renderGateway();
     } catch (error) {
       showToast(error.message);
       if (error.message.includes('autorizado')) { api.saveSession(null); setTimeout(() => location.replace('login.html'), 1200); }
@@ -331,20 +379,29 @@
   document.querySelector('#product-search')?.addEventListener('input', filterProducts);
   document.querySelector('#customer-search')?.addEventListener('input', filterCustomers);
   document.querySelector('[data-export-customers]')?.addEventListener('click', exportCustomers);
+  document.querySelectorAll('[data-gateway-provider]').forEach((button) => button.addEventListener('click', () => {
+    selectedGateway = button.dataset.gatewayProvider;
+    const form = document.querySelector('[data-gateway-key-form]');
+    form?.reset();
+    document.querySelector('#gateway-key-error').textContent = '';
+    document.querySelectorAll('.gateway-key-input').forEach((field) => field.classList.remove('has-error'));
+    renderGateway();
+  }));
   document.querySelector('[data-gateway-toggle]')?.addEventListener('change', async (event) => {
     const session = await api.validSession();
     if (!session) return location.replace('login.html');
     const active = event.target.checked;
     event.target.disabled = true;
     try {
-      await api.request('/rest/v1/gateway_settings?provider=eq.primecash', {
-        method: 'PATCH',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify({ active, updated_at: new Date().toISOString() })
+      await api.request('/rest/v1/rpc/set_active_gateway', {
+        method: 'POST',
+        body: JSON.stringify({ p_provider: selectedGateway, p_active: active })
       }, session.access_token);
-      const health = await loadGatewayHealth(session);
-      renderGateway({ active }, health);
-      showToast(active ? 'PrimeCash definida como gateway do checkout.' : 'PrimeCash desativada no checkout.');
+      Object.values(gatewaySettings).forEach((settings) => { settings.active = false; });
+      gatewaySettings[selectedGateway] = { ...(gatewaySettings[selectedGateway] || {}), active };
+      gatewayHealth[selectedGateway] = await loadGatewayHealth(session, selectedGateway);
+      renderGateway();
+      showToast(active ? `${gatewayCatalog[selectedGateway].shortName} definido como gateway do checkout.` : `${gatewayCatalog[selectedGateway].shortName} desativado no checkout.`);
     } catch (error) {
       event.target.checked = !active;
       event.target.disabled = false;
@@ -357,15 +414,16 @@
     if (!session) return location.replace('login.html');
     button.disabled = true;
     button.textContent = 'Testando...';
-    const health = await api.primecashRequest('/status?probe=1', {}, session.access_token).catch(() => ({ configured: false, reachable: false }));
-    const rows = await api.request('/rest/v1/gateway_settings?provider=eq.primecash&select=active', {}, session.access_token).catch(() => []);
-    renderGateway(rows[0] || { active: false }, health);
-    showToast(health.reachable ? 'Conexão com a PrimeCash confirmada.' : health.configured ? 'Chave salva, mas a conexão não respondeu.' : 'Cadastre a Secret Key da PrimeCash.');
+    const health = await api.primecashRequest(`/status?provider=${encodeURIComponent(selectedGateway)}&probe=1`, {}, session.access_token).catch(() => ({ configured: false, reachable: false }));
+    gatewayHealth[selectedGateway] = health;
+    renderGateway();
+    const meta = gatewayCatalog[selectedGateway];
+    showToast(health.reachable ? `Conexão com a ${meta.shortName} confirmada.` : health.configured ? 'Chave salva, mas a conexão não respondeu.' : `Cadastre a ${meta.keyLabel}.`);
     button.disabled = false;
     button.textContent = 'Testar conexão';
   });
   document.querySelector('[data-toggle-gateway-key]')?.addEventListener('click', (event) => {
-    const input = document.querySelector('#primecash-secret-key');
+    const input = document.querySelector('#gateway-secret-key');
     const visible = input.type === 'text';
     input.type = visible ? 'password' : 'text';
     event.currentTarget.setAttribute('aria-pressed', String(!visible));
@@ -378,9 +436,10 @@
     const submit = form.querySelector('[type="submit"]');
     const session = await api.validSession();
     if (!session) return location.replace('login.html');
-    const error = document.querySelector('#primecash-key-error');
+    const error = document.querySelector('#gateway-key-error');
     const inputWrap = input.closest('.gateway-key-input');
     const secretKey = input.value.trim();
+    const webhookSecret = form.elements.webhookSecret?.value.trim() || '';
     error.textContent = '';
     inputWrap.classList.remove('has-error');
     input.removeAttribute('aria-invalid');
@@ -393,11 +452,13 @@
     submit.disabled = true;
     submit.querySelector('span').textContent = 'Validando e salvando...';
     try {
-      const health = await api.primecashRequest('/credentials', { method: 'PUT', body: JSON.stringify({ secretKey }) }, session.access_token);
+      const health = await api.primecashRequest(`/credentials?provider=${encodeURIComponent(selectedGateway)}`, { method: 'PUT', body: JSON.stringify({ secretKey, webhookSecret }) }, session.access_token);
       input.value = '';
       input.type = 'password';
-      renderGateway({ active: document.querySelector('[data-gateway-toggle]').checked }, health);
-      showToast('Secret Key salva com criptografia no Supabase Vault.');
+      if (form.elements.webhookSecret) form.elements.webhookSecret.value = '';
+      gatewayHealth[selectedGateway] = health;
+      renderGateway();
+      showToast(`${gatewayCatalog[selectedGateway].keyLabel} salva com criptografia no Supabase Vault.`);
     } catch (saveError) {
       error.textContent = saveError.message;
       inputWrap.classList.add('has-error');

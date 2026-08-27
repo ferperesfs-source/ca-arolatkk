@@ -2,6 +2,7 @@
 Thumbs.db
 .vercel
 node_modules
+supabase/.temp/
 .env
 .env.*
 !.env.example
