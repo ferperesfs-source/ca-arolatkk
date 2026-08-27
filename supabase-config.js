@@ -1,7 +1,7 @@
 (() => {
   const url = 'https://futysxjtptcsahgyrpci.supabase.co';
   const publishableKey = 'sb_publishable_5ZHATfufgFDbhiJnFBp4ig_xaxf-1Oq';
-  const primecashFunctionUrl = `${url}/functions/v1/primecash`;
+  const checkoutEndpoint = '/api/flow';
   const sessionKey = 'cacarolaAdminSession';
 
   const request = async (path, options = {}, accessToken = '') => {
@@ -75,10 +75,11 @@
   const primecashRequest = async (path, options = {}, accessToken = '') => {
     let response;
     try {
-      response = await fetch(`${primecashFunctionUrl}${path}`, {
+      const isCheckout = path === '/checkout' && !accessToken;
+      response = await fetch(isCheckout ? checkoutEndpoint : `${url}/functions/v1/primecash${path}`, {
         ...options,
         headers: {
-          apikey: publishableKey,
+          ...(!isCheckout ? { apikey: publishableKey } : {}),
           'Content-Type': 'application/json',
           ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
           ...(options.headers || {})
