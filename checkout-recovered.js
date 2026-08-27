@@ -345,18 +345,51 @@
           }))
         })
       });
-      if (!data.secureUrl) throw new Error('Não foi possível abrir o pagamento.');
-      showFormMessage('Pedido criado. Redirecionando para o pagamento seguro...');
-      button.textContent = 'REDIRECIONANDO...';
-      location.assign(data.secureUrl);
+      if (!data.pixCode || !data.qrCodeImage) throw new Error('Não foi possível gerar o Pix.');
+      renderPixPayment(data);
     } catch (error) {
-      const customerMessage = /gateway|administrador|configurad|desativad/i.test(error.message)
+      const customerMessage = /gateway|primecash|administrador|configurad|desativad/i.test(error.message)
         ? 'Pagamento temporariamente indisponível. Tente novamente mais tarde.'
         : error.message;
       showFormMessage(customerMessage, true);
       button.disabled = false;
       button.textContent = 'CONTINUAR PARA PAGAMENTO';
     }
+  };
+
+  const renderPixPayment = (payment) => {
+    if (!formSection) return;
+    const expiration = payment.expiresAt
+      ? new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short' }).format(new Date(`${payment.expiresAt}T12:00:00`))
+      : '';
+    formSection.innerHTML = `<div class="space-y-4">
+      <div><h2 style="font-size:18px;font-weight:700;color:rgb(23 23 23);margin:0">Pague com Pix</h2><p style="font-size:12px;color:rgb(115 115 115);margin:5px 0 0">Escaneie o QR Code ou copie o código abaixo.</p></div>
+      <div style="border:1px solid rgb(229 229 229);border-radius:16px;padding:16px;display:grid;place-items:center;gap:10px;background:#fff"><img data-pix-qr width="220" height="220" alt="QR Code Pix para pagamento" style="display:block;width:min(220px,72vw);height:auto;aspect-ratio:1;background:#fff"><strong style="font-size:17px;color:rgb(23 23 23)">${money(items.reduce((sum, item) => sum + item.price * item.qty, 0))}</strong>${expiration ? `<span style="font-size:11px;color:rgb(115 115 115)">Válido até ${escapeHtml(expiration)}</span>` : ''}</div>
+      <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Pix copia e cola</span><textarea data-pix-code readonly rows="3" style="width:100%;box-sizing:border-box;resize:none;border:1px solid rgb(229 229 229);border-radius:12px;padding:11px 12px;background:rgb(250 250 250);color:rgb(64 64 64);font:500 11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere"></textarea></label>
+      <button class="tt-btn" type="button" data-copy-pix>COPIAR CÓDIGO PIX</button>
+      <p data-pix-copy-status role="status" aria-live="polite" style="min-height:17px;margin:0;text-align:center;font-size:11px;color:rgb(5 150 105)"></p>
+      <p style="margin:0;text-align:center;font-size:11px;line-height:1.5;color:rgb(115 115 115)">Pedido #${escapeHtml(payment.orderId)} · Aguardando confirmação do pagamento.</p>
+    </div>`;
+    const qrImage = formSection.querySelector('[data-pix-qr]');
+    const pixCode = formSection.querySelector('[data-pix-code]');
+    const copyStatus = formSection.querySelector('[data-pix-copy-status]');
+    if (qrImage) qrImage.src = payment.qrCodeImage;
+    if (pixCode) pixCode.value = payment.pixCode;
+    formSection.querySelector('[data-copy-pix]')?.addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      try {
+        await navigator.clipboard.writeText(payment.pixCode);
+      } catch {
+        pixCode?.select();
+        document.execCommand('copy');
+      }
+      button.textContent = 'CÓDIGO COPIADO';
+      if (copyStatus) copyStatus.textContent = 'Código Pix copiado. Abra o aplicativo do seu banco para pagar.';
+      setTimeout(() => { button.textContent = 'COPIAR CÓDIGO PIX'; }, 2500);
+    });
+    resetMessage();
+    checkoutButton = formSection.querySelector('[data-copy-pix]');
+    setStep(3);
   };
 
   const renderPayment = () => {

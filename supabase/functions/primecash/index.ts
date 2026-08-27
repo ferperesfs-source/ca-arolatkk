@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
+import QRCode from "npm:qrcode@1.5.4";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
@@ -74,17 +75,17 @@ const readPrimecash = async (response: Response) => {
 const primecashRequest = async (path: string, secret: string, options: RequestInit = {}) => readPrimecash(await primecashFetch(path, secret, options));
 
 const probeSecret = async (secret: string) => {
-  const response = await primecashFetch("/checkouts/0", secret, { method: "GET" });
+  const response = await primecashFetch("/company", secret, { method: "GET" });
   if (response.status === 401 || response.status === 403) return false;
-  if (response.status >= 500) throw new Error("A PrimeCash está temporariamente indisponível.");
-  return true;
+  if (!response.ok) await readPrimecash(response);
+  return response.ok;
 };
 
 const productId = (value: unknown) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 80);
 
 const statusMap: Record<string, string> = {
   paid: "paid", authorized: "processing", processing: "processing", pending: "pending", waiting_payment: "pending",
-  refused: "cancelled", cancelled: "cancelled", refunded: "cancelled", chargedback: "cancelled",
+  refused: "cancelled", cancelled: "cancelled", canceled: "cancelled", refunded: "cancelled", chargedback: "cancelled",
 };
 
 const handleStatus = async (req: Request, url: URL) => {
@@ -156,11 +157,23 @@ const handleCheckout = async (req: Request) => {
   if (orderError || !order) throw orderError || new Error("Não foi possível registrar o pedido.");
 
   try {
-    const checkout = await primecashRequest("/checkouts", secret, {
+    const transaction = await primecashRequest("/transactions", secret, {
       method: "POST",
       body: JSON.stringify({
         amount: Math.round(Number(order.amount) * 100),
-        description: `Pedido Colinox #${order.id}`,
+        paymentMethod: "pix",
+        customer: {
+          name, email, phone,
+          document: { number: taxId, type: taxId.length === 14 ? "cnpj" : "cpf" },
+          externalRef: reference,
+        },
+        shipping: {
+          fee: 0,
+          address: {
+            street, streetNumber, complement: complement || undefined, zipCode: postalCode,
+            neighborhood, city, state, country: "BR",
+          },
+        },
         postbackUrl: `${FUNCTION_URL}/webhook?reference=${encodeURIComponent(reference)}`,
         items: order.items.map((item: any) => ({
           title: `${item.title} - ${item.variant_name}`,
@@ -168,20 +181,27 @@ const handleCheckout = async (req: Request) => {
           quantity: Number(item.quantity), tangible: true,
           externalRef: `${reference}:${item.product_id}`,
         })),
-        settings: {
-          defaultPaymentMethod: "pix", requestAddress: true, requestPhone: true, requestDocument: true, traceable: true,
-          pix: { enabled: true, expiresInDays: 2 }, boleto: { enabled: false, expiresInDays: 2 },
-          card: { enabled: false, freeInstallments: 1, maxInstallments: 1 },
-        },
+        pix: { expiresInDays: 2 },
+        metadata: JSON.stringify({ orderId: order.id, reference }),
+        traceable: true,
         splits: [],
       }),
     });
-    if (!checkout?.id || !checkout?.secureUrl) throw new Error("A PrimeCash não retornou uma URL de pagamento.");
+    const pixCode = String(transaction?.pix?.qrcode || "").trim();
+    if (!transaction?.id || !pixCode) throw new Error("A PrimeCash não retornou o código Pix da transação.");
+    const qrSvg = await QRCode.toString(pixCode, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 280 });
+    const qrCodeImage = `data:image/svg+xml;base64,${btoa(qrSvg)}`;
     const { error: updateError } = await supabase.from("orders").update({
-      gateway_checkout_id: String(checkout.id), gateway_status: "pending", updated_at: new Date().toISOString(),
+      gateway_checkout_id: String(transaction.id), gateway_status: String(transaction.status || "waiting_payment"), updated_at: new Date().toISOString(),
     }).eq("id", order.id);
     if (updateError) throw updateError;
-    return json({ orderId: order.id, secureUrl: checkout.secureUrl });
+    return json({
+      orderId: order.id,
+      status: String(transaction.status || "waiting_payment"),
+      pixCode,
+      qrCodeImage,
+      expiresAt: transaction.pix?.expirationDate || null,
+    });
   } catch (error) {
     await supabase.from("orders").update({ status: "cancelled", gateway_status: "creation_failed", updated_at: new Date().toISOString() }).eq("id", order.id);
     throw error;
@@ -195,13 +215,13 @@ const handleWebhook = async (req: Request, url: URL) => {
   const payload = await parseJson(req) as any;
   const { data: order } = await supabase.from("orders").select("id,gateway_checkout_id").eq("payment_reference", reference).maybeSingle();
   if (!order?.gateway_checkout_id) return json({ error: "Pedido não encontrado." }, 404);
-  const eventCheckoutId = String(payload.type === "checkout" ? (payload.objectId || payload.data?.id || "") : (payload.data?.checkoutId || ""));
-  if (eventCheckoutId && eventCheckoutId !== String(order.gateway_checkout_id)) return json({ error: "Checkout divergente." }, 409);
+  const eventTransactionId = String(payload.type === "transaction" ? (payload.objectId || payload.data?.id || "") : (payload.data?.transaction?.id || ""));
+  if (eventTransactionId && eventTransactionId !== String(order.gateway_checkout_id)) return json({ error: "Transação divergente." }, 409);
   const secret = await getSecret();
   if (!secret) throw new Error("Credencial PrimeCash indisponível.");
-  const verified = await primecashRequest(`/checkouts/${encodeURIComponent(order.gateway_checkout_id)}`, secret);
-  const gatewayStatus = String(verified?.transaction?.status || "pending").toLowerCase();
-  const address = verified?.transaction?.customer?.address;
+  const verified = await primecashRequest(`/transactions/${encodeURIComponent(order.gateway_checkout_id)}`, secret);
+  const gatewayStatus = String(verified?.status || payload.data?.status || "pending").toLowerCase();
+  const address = verified?.customer?.address || verified?.shipping?.address;
   const update: Record<string, unknown> = { status: statusMap[gatewayStatus] || "pending", gateway_status: gatewayStatus, updated_at: new Date().toISOString() };
   if (address) {
     update.shipping_address = [address.street, address.streetNumber, address.complement, address.neighborhood].filter(Boolean).join(", ");

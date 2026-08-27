@@ -275,7 +275,7 @@
     notice.textContent = healthy
       ? 'PrimeCash está ativa. O checkout já pode criar pagamentos reais.'
       : active
-        ? 'Cadastre a Secret Key da PrimeCash ao lado para liberar o checkout.'
+        ? 'Cadastre a Secret Key abaixo para liberar o checkout.'
         : 'Ative este gateway para usá-lo nas novas compras.';
   };
 
@@ -405,7 +405,7 @@
       input.focus();
     } finally {
       submit.disabled = false;
-      submit.querySelector('span').textContent = 'Salvar chave com segurança';
+      submit.querySelector('span').textContent = 'Salvar chave';
     }
   });
   document.querySelector('.global-search input')?.addEventListener('keydown', (event) => {
