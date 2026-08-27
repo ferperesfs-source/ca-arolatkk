@@ -77,35 +77,25 @@ const primecashRequest = async (path: string, secret: string, options: RequestIn
 type SecretProbe = {
   accepted: boolean;
   status: number;
+  reason: string;
+};
+
+const safeProviderReason = async (response: Response) => {
+  const text = await response.text();
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  const reason = String(data?.message || data?.error || "").replace(/\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_-]+\b/gi, "[credencial protegida]").trim();
+  return reason.slice(0, 180);
 };
 
 const probeSecret = async (secret: string): Promise<SecretProbe> => {
-  // Testa primeiro a mesma área da API usada pelo checkout. Algumas contas
-  // restringem endpoints administrativos, como /company, por permissão.
-  const paths = ["/transactions?limit=1", "/company", "/balance/available"];
-  let authStatus = 401;
-
-  for (const path of paths) {
-    const response = await primecashFetch(path, secret, { method: "GET" });
-    if (response.ok) return { accepted: true, status: response.status };
-
-    if (response.status === 401 || response.status === 403) {
-      authStatus = Math.max(authStatus, response.status);
-      console.warn("PrimeCash credential probe rejected:", path, response.status);
-      continue;
-    }
-
-    // Uma resposta 4xx diferente de autenticação comprova que a API reconheceu
-    // a credencial, ainda que a rota tenha recusado algum parâmetro opcional.
-    if (response.status >= 400 && response.status < 500) {
-      console.info("PrimeCash credential probe accepted with route response:", path, response.status);
-      return { accepted: true, status: response.status };
-    }
-
-    await readPrimecash(response);
-  }
-
-  return { accepted: false, status: authStatus };
+  // A documentação oficial define GET /transactions como uma operação Basic
+  // Auth sem parâmetros. Só uma resposta 2xx comprova que a chave funciona.
+  const response = await primecashFetch("/transactions", secret, { method: "GET" });
+  if (response.ok) return { accepted: true, status: response.status, reason: "" };
+  const reason = await safeProviderReason(response);
+  console.warn("PrimeCash credential probe rejected:", response.status, reason || "no provider detail");
+  return { accepted: false, status: response.status, reason };
 };
 
 const productId = (value: unknown) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 80);
@@ -136,9 +126,14 @@ const handleCredentials = async (req: Request) => {
   if (secretKey.length < 12 || secretKey.length > 500) return json({ error: "Informe uma Secret Key válida." }, 400);
   const probe = await probeSecret(secretKey);
   if (!probe.accepted) {
-    const error = probe.status === 403
+    const baseError = probe.status === 403
       ? "A credencial chegou à PrimeCash, mas não tem permissão para usar a API. Verifique se a conta e a API estão habilitadas."
-      : "A PrimeCash recusou a autenticação (HTTP 401). Use a Secret Key de Configurações → Credenciais de API, não a chave pública.";
+      : probe.status === 401
+        ? "A PrimeCash recusou a autenticação (HTTP 401). Use a Secret Key de Configurações → Credenciais de API, não a chave pública."
+        : `A PrimeCash recusou a validação (HTTP ${probe.status}).`;
+    const error = probe.reason && !baseError.toLowerCase().includes(probe.reason.toLowerCase())
+      ? `${baseError} Retorno da API: ${probe.reason}`
+      : baseError;
     return json({ error, providerStatus: probe.status }, 400);
   }
   const { error } = await supabase.rpc("set_primecash_secret", { p_secret: secretKey });
