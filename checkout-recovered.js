@@ -226,7 +226,7 @@
       postalCodeInput.setAttribute('aria-busy', 'true');
       setPostalCodeHelp('Buscando endereço...');
       try {
-        const response = await fetch(`/api/cep?cep=${postalCode}`, {
+        const response = await fetch(`/buscar-endereco?cep=${postalCode}`, {
           headers: { Accept: 'application/json' }, signal: controller.signal
         });
         if (response.status === 404) {
