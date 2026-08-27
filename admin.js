@@ -76,11 +76,39 @@
     pending: ['Aguardando', 'waiting'], cancelled: ['Cancelado', 'waiting']
   };
 
+  let cachedOrders = [];
+  let cachedCustomers = [];
+
+  const routeConfig = {
+    '#visao-geral': { view: 'overview', title: 'Visão geral', search: 'Buscar pedido, cliente...' },
+    '#pedidos': { view: 'orders', title: 'Pedidos', search: 'Buscar pedido ou cliente...' },
+    '#produtos': { view: 'products', title: 'Produtos', search: 'Buscar produto...' },
+    '#clientes': { view: 'customers', title: 'Clientes', search: 'Buscar cliente...' }
+  };
+
+  const currentRoute = () => routeConfig[location.hash] || routeConfig['#visao-geral'];
+  const showRoute = ({ focus = false } = {}) => {
+    const route = currentRoute();
+    document.querySelectorAll('[data-view]').forEach((view) => { view.hidden = view.dataset.view !== route.view; });
+    document.querySelectorAll('[data-route]').forEach((item) => {
+      const active = item.dataset.route === route.view;
+      item.classList.toggle('is-active', active);
+      if (active) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    });
+    document.querySelector('.topbar-title h1').textContent = route.title;
+    const globalSearch = document.querySelector('.global-search input');
+    if (globalSearch) globalSearch.placeholder = route.search;
+    document.title = `${route.title} | Colinox Admin`;
+    closeMenu();
+    if (focus) document.querySelector('#admin-main')?.focus({ preventScroll: true });
+  };
+
   const renderOrders = (orders) => {
     const body = document.querySelector('#orders-body');
     if (!orders.length) {
-      body.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:28px">Nenhum pedido real registrado ainda.</td></tr>';
-      document.querySelector('.table-footer span').textContent = 'Nenhum pedido registrado';
+      body.innerHTML = '<tr><td colspan="6" class="table-empty">Nenhum pedido real registrado ainda.</td></tr>';
+      document.querySelector('.orders-panel .table-footer span').textContent = 'Nenhum pedido registrado';
       return;
     }
     body.innerHTML = orders.map((order) => {
@@ -89,21 +117,68 @@
       const [label, className] = statusInfo[order.status] || [order.status, 'waiting'];
       return `<tr data-status="${escapeHtml(label)}"><td><strong>#CLX-${String(order.id).padStart(4, '0')}</strong></td><td><span class="customer"><i>${escapeHtml(initials)}</i><span>${escapeHtml(order.customer_name)}<small>${escapeHtml(order.customer_email)}</small></span></span></td><td>${escapeHtml(product)}</td><td><strong>${money(order.amount)}</strong></td><td><span class="status ${className}">${escapeHtml(label)}</span></td><td>${dateTime(order.created_at)}</td></tr>`;
     }).join('');
-    document.querySelector('.table-footer span').textContent = `Exibindo ${orders.length} pedido${orders.length === 1 ? '' : 's'}`;
+    document.querySelector('.orders-panel .table-footer span').textContent = `Exibindo ${orders.length} pedido${orders.length === 1 ? '' : 's'}`;
+    const confirmedRevenue = orders.filter((order) => ['paid', 'fulfilled'].includes(order.status)).reduce((sum, order) => sum + Number(order.amount || 0), 0);
+    document.querySelector('[data-orders-total]').textContent = String(orders.length);
+    document.querySelector('[data-orders-pending]').textContent = String(orders.filter((order) => order.status === 'pending').length);
+    document.querySelector('[data-orders-revenue]').textContent = money(confirmedRevenue);
   };
 
   const renderProducts = (products) => {
     const totalKnown = products.reduce((sum, product) => sum + (product.stock_quantity ?? 0), 0);
     document.querySelector('[data-product-count]').textContent = `${products.length} variações ativas`;
     document.querySelector('[data-stock-total]').textContent = products.every((product) => product.stock_quantity == null) ? 'Não informado' : `${totalKnown} un.`;
-    document.querySelector('.stock-list').innerHTML = products.map((product, index) => {
+    document.querySelector('[data-products-total]').textContent = String(products.length);
+    const grid = document.querySelector('[data-product-grid]');
+    grid.innerHTML = products.length ? products.map((product) => {
       const quantity = product.stock_quantity;
-      return `<div><span><i class="${['marble','quartz','graphite','olive'][index] || 'marble'}"></i>${escapeHtml(product.variant_name)} <b>${quantity == null ? '—' : quantity}</b></span><progress max="100" value="${quantity == null ? 0 : Math.min(quantity, 100)}"></progress></div>`;
-    }).join('');
+      const stockClass = quantity == null ? 'unknown' : quantity < 10 ? 'low' : '';
+      const stockLabel = quantity == null ? 'Não informado' : quantity < 10 ? 'Estoque baixo' : 'Disponível';
+      return `<article class="product-card" data-search="${escapeHtml(`${product.title} ${product.variant_name}`.toLocaleLowerCase('pt-BR'))}"><img src="${escapeHtml(product.image_url || 'cart-marmore.png')}" alt="${escapeHtml(`${product.title} ${product.variant_name}`)}" loading="lazy"><div class="product-card-header"><span><h3>${escapeHtml(product.variant_name)}</h3><small>${escapeHtml(product.title)}</small></span><strong>${money(product.price)}</strong></div><div class="stock-row"><span>Estoque <b>${quantity == null ? '—' : quantity}</b></span><span class="stock-pill ${stockClass}">${stockLabel}</span></div></article>`;
+    }).join('') : '<p class="empty-state">Nenhum produto ativo cadastrado.</p>';
     const knownLow = products.filter((product) => product.stock_quantity != null && product.stock_quantity < 10);
+    document.querySelector('[data-low-stock-total]').textContent = String(knownLow.length);
     const alert = document.querySelector('.stock-alert');
     alert.hidden = !knownLow.length;
     if (knownLow.length) alert.querySelector('span').innerHTML = `<strong>Estoque baixo</strong>${escapeHtml(knownLow.map((product) => product.variant_name).join(', '))}`;
+  };
+
+  const buildCustomers = (orders) => {
+    const customers = new Map();
+    orders.forEach((order) => {
+      const email = String(order.customer_email || '').trim().toLocaleLowerCase('pt-BR');
+      const key = email || `pedido-${order.id}`;
+      const existing = customers.get(key) || { name: order.customer_name || 'Cliente', email, orders: 0, spent: 0, lastOrder: order.created_at };
+      existing.orders += 1;
+      if (['paid', 'fulfilled'].includes(order.status)) existing.spent += Number(order.amount || 0);
+      if (new Date(order.created_at) > new Date(existing.lastOrder)) existing.lastOrder = order.created_at;
+      customers.set(key, existing);
+    });
+    return [...customers.values()].sort((a, b) => new Date(b.lastOrder) - new Date(a.lastOrder));
+  };
+
+  const renderCustomers = (orders) => {
+    cachedCustomers = buildCustomers(orders);
+    const body = document.querySelector('#customers-body');
+    body.innerHTML = cachedCustomers.length ? cachedCustomers.map((customer) => {
+      const initials = customer.name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
+      return `<tr data-search="${escapeHtml(`${customer.name} ${customer.email}`.toLocaleLowerCase('pt-BR'))}"><td><span class="customer"><i>${escapeHtml(initials)}</i><span>${escapeHtml(customer.name)}<small>${escapeHtml(customer.email || 'E-mail não informado')}</small></span></span></td><td><strong>${customer.orders}</strong></td><td><strong>${money(customer.spent)}</strong></td><td>${dateTime(customer.lastOrder)}</td></tr>`;
+    }).join('') : '<tr><td colspan="4" class="table-empty">Nenhum cliente registrado ainda.</td></tr>';
+    const paidOrders = orders.filter((order) => ['paid', 'fulfilled'].includes(order.status));
+    const paidRevenue = paidOrders.reduce((sum, order) => sum + Number(order.amount || 0), 0);
+    document.querySelector('[data-customer-total]').textContent = String(cachedCustomers.length);
+    document.querySelector('[data-repeat-customers]').textContent = String(cachedCustomers.filter((customer) => customer.orders > 1).length);
+    document.querySelector('[data-average-ticket]').textContent = money(paidOrders.length ? paidRevenue / paidOrders.length : 0);
+    document.querySelector('[data-customers-footer]').textContent = `${cachedCustomers.length} cliente${cachedCustomers.length === 1 ? '' : 's'} na base`;
+  };
+
+  const renderActivity = (orders) => {
+    const list = document.querySelector('[data-activity-list]');
+    if (!orders.length) return list.innerHTML = '<p class="empty-state">Nenhuma atividade registrada ainda.</p>';
+    list.innerHTML = orders.slice(0, 4).map((order) => {
+      const [label] = statusInfo[order.status] || [order.status];
+      return `<div class="activity-item"><i>${escapeHtml(order.customer_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase())}</i><span><strong>${escapeHtml(order.customer_name)}</strong><small>#CLX-${String(order.id).padStart(4, '0')} · ${escapeHtml(label)}</small></span><b>${money(order.amount)}</b></div>`;
+    }).join('');
   };
 
   const renderMetrics = (orders, events) => {
@@ -132,7 +207,6 @@
       return `<div class="${index === 6 ? 'is-current' : ''}" style="--bar:${Math.max(value ? 8 : 2, (value / max) * 88)}%"><span>${money(value)}</span><i></i><small>${label}</small></div>`;
     }).join('');
     document.querySelector('[data-week-revenue]').textContent = money(dayValues.reduce((sum, value) => sum + value, 0));
-    document.querySelector('[data-customer-total]').textContent = `${new Set(orders.map((order) => order.customer_email)).size} compradores`;
     document.querySelector('[data-order-badge]').textContent = String(orders.filter((order) => order.status === 'pending').length);
   };
 
@@ -145,7 +219,35 @@
       row.hidden = !matches;
       if (matches) visible += 1;
     });
-    document.querySelector('.table-footer span').textContent = visible ? `Exibindo ${visible} pedido${visible === 1 ? '' : 's'}` : 'Nenhum pedido encontrado';
+    document.querySelector('.orders-panel .table-footer span').textContent = visible ? `Exibindo ${visible} pedido${visible === 1 ? '' : 's'}` : 'Nenhum pedido encontrado';
+  };
+
+  const filterProducts = () => {
+    const query = document.querySelector('#product-search').value.trim().toLocaleLowerCase('pt-BR');
+    document.querySelectorAll('.product-card').forEach((card) => { card.hidden = Boolean(query && !card.dataset.search.includes(query)); });
+  };
+
+  const filterCustomers = () => {
+    const query = document.querySelector('#customer-search').value.trim().toLocaleLowerCase('pt-BR');
+    let visible = 0;
+    document.querySelectorAll('#customers-body tr[data-search]').forEach((row) => {
+      const matches = !query || row.dataset.search.includes(query);
+      row.hidden = !matches;
+      if (matches) visible += 1;
+    });
+    document.querySelector('[data-customers-footer]').textContent = visible ? `Exibindo ${visible} cliente${visible === 1 ? '' : 's'}` : 'Nenhum cliente encontrado';
+  };
+
+  const exportCustomers = () => {
+    if (!cachedCustomers.length) return showToast('Ainda não há clientes para exportar.');
+    const quote = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csv = ['Nome,E-mail,Pedidos,Total gasto,Última compra', ...cachedCustomers.map((customer) => [customer.name, customer.email, customer.orders, customer.spent.toFixed(2), new Date(customer.lastOrder).toISOString()].map(quote).join(','))].join('\r\n');
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }));
+    link.download = `clientes-colinox-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    showToast('Relatório de clientes exportado.');
   };
 
   const boot = async () => {
@@ -162,9 +264,11 @@
       const displayName = membership[0].display_name || 'Administrador';
       document.querySelector('.admin-user strong').textContent = displayName;
       document.querySelector('.admin-user .user-avatar').textContent = displayName.split(/\s+/).slice(0,2).map((part) => part[0]).join('').toUpperCase();
-      document.querySelector('.welcome-row h2').textContent = `Olá, ${displayName.split(' ')[0]}`;
-      document.querySelector('.eyebrow').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date()).toLocaleUpperCase('pt-BR');
-      renderOrders(orders); renderProducts(products); renderMetrics(orders, events);
+      document.querySelector('.admin-user small').textContent = membership[0].email || 'Administrador';
+      document.querySelector('#overview-heading').textContent = `Olá, ${displayName.split(' ')[0]}`;
+      document.querySelector('[data-view="overview"] .eyebrow').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date()).toLocaleUpperCase('pt-BR');
+      cachedOrders = orders;
+      renderOrders(orders); renderProducts(products); renderCustomers(orders); renderActivity(orders); renderMetrics(orders, events);
     } catch (error) {
       showToast(error.message);
       if (error.message.includes('autorizado')) { api.saveSession(null); setTimeout(() => location.replace('login.html'), 1200); }
@@ -175,7 +279,10 @@
   const closeMenu = () => { document.body.classList.remove('menu-open'); menuButton?.setAttribute('aria-expanded', 'false'); };
   menuButton?.addEventListener('click', () => { const open = document.body.classList.toggle('menu-open'); menuButton.setAttribute('aria-expanded', String(open)); });
   document.querySelector('[data-close-menu]')?.addEventListener('click', closeMenu);
-  document.querySelectorAll('.sidebar-nav .nav-item').forEach((item) => item.addEventListener('click', closeMenu));
+  document.querySelectorAll('[data-route]').forEach((item) => item.addEventListener('click', () => {
+    if (location.hash === item.hash) showRoute({ focus: true });
+  }));
+  addEventListener('hashchange', () => showRoute({ focus: true }));
   document.querySelector('[data-logout]')?.addEventListener('click', async () => {
     const session = api.getSession();
     if (session?.access_token) await api.request('/auth/v1/logout', { method: 'POST' }, session.access_token).catch(() => null);
@@ -183,12 +290,24 @@
   });
   document.querySelector('#order-search')?.addEventListener('input', filterOrders);
   document.querySelector('#status-filter')?.addEventListener('change', filterOrders);
+  document.querySelector('#product-search')?.addEventListener('input', filterProducts);
+  document.querySelector('#customer-search')?.addEventListener('input', filterCustomers);
+  document.querySelector('[data-export-customers]')?.addEventListener('click', exportCustomers);
   document.querySelector('.global-search input')?.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
-    document.querySelector('#order-search').value = event.target.value; filterOrders(); document.querySelector('#pedidos')?.scrollIntoView({ behavior: 'smooth' });
+    const route = currentRoute().view;
+    const targets = { orders: '#order-search', products: '#product-search', customers: '#customer-search' };
+    const targetRoute = route === 'overview' ? 'orders' : route;
+    if (route === 'overview') location.hash = '#pedidos';
+    const target = document.querySelector(targets[targetRoute]);
+    if (!target) return;
+    target.value = event.target.value;
+    ({ orders: filterOrders, products: filterProducts, customers: filterCustomers }[targetRoute])();
+    target.focus();
   });
   document.querySelector('.notification-button')?.addEventListener('click', () => showToast('Os indicadores estão sincronizados com o Supabase.'));
-  document.querySelector('[data-more-orders]')?.addEventListener('click', () => showToast('Todos os pedidos carregados estão visíveis.'));
-  document.querySelectorAll('[data-toast]').forEach((button) => button.addEventListener('click', () => showToast('Exportação será habilitada quando houver pedidos.')));
+  document.querySelector('[data-more-orders]')?.addEventListener('click', () => { renderOrders(cachedOrders); filterOrders(); showToast('Lista de pedidos atualizada.'); });
+  if (!location.hash || !routeConfig[location.hash]) history.replaceState(null, '', '#visao-geral');
+  showRoute();
   boot();
 })();
