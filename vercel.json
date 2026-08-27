@@ -3,6 +3,7 @@
   "cleanUrls": false,
   "rewrites": [
     { "source": "/buscar-endereco", "destination": "/api/cep" },
+    { "source": "/pagamento/:path*", "destination": "https://futysxjtptcsahgyrpci.supabase.co/functions/v1/primecash/:path*" },
     { "source": "/api/primecash/:path*", "destination": "https://futysxjtptcsahgyrpci.supabase.co/functions/v1/primecash/:path*" },
     { "source": "/login", "destination": "/login.html" },
     { "source": "/admin", "destination": "/admin.html" },

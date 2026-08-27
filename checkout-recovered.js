@@ -148,9 +148,12 @@
     if (!formMessage) {
       formMessage = document.createElement('p');
       formMessage.dataset.checkoutMessage = 'true';
-      formMessage.style.cssText = 'margin:0;font-size:12px;line-height:1.45;text-align:center;padding:10px;border-radius:10px';
-      checkoutButton?.before(formMessage);
+      formMessage.style.cssText = 'width:100%;box-sizing:border-box;margin:0;font-size:12px;line-height:1.45;text-align:center;padding:10px 12px;border-radius:10px';
+      const buttonContainer = checkoutButton?.parentElement;
+      const messageAnchor = buttonContainer?.querySelectorAll(':scope > button').length > 1 ? buttonContainer : checkoutButton;
+      messageAnchor?.before(formMessage);
     }
+    formMessage.setAttribute('role', error ? 'alert' : 'status');
     formMessage.textContent = message;
     formMessage.style.color = error ? '#b42342' : '#087a50';
     formMessage.style.background = error ? '#fff0f3' : '#e8f8f0';
@@ -347,7 +350,10 @@
       button.textContent = 'REDIRECIONANDO...';
       location.assign(data.secureUrl);
     } catch (error) {
-      showFormMessage(error.message, true);
+      const customerMessage = /gateway|administrador|configurad|desativad/i.test(error.message)
+        ? 'Pagamento temporariamente indisponível. Tente novamente mais tarde.'
+        : error.message;
+      showFormMessage(customerMessage, true);
       button.disabled = false;
       button.textContent = 'CONTINUAR PARA PAGAMENTO';
     }
