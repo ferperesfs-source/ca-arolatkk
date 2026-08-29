@@ -2,7 +2,7 @@
   if (!window.CacarolaSupabase) {
     await new Promise((resolve) => {
       const script = document.createElement('script');
-      script.src = 'supabase-config.js?v=6';
+      script.src = 'supabase-config.js?v=7';
       script.onload = resolve;
       script.onerror = resolve;
       document.head.appendChild(script);
@@ -57,6 +57,7 @@
     { id: 'sedex-12', title: 'SEDEX 12', description: 'Entrega de 12h a 24h', price: 33.4, image: 'assets/checkout/shipping-sedex.png' }
   ];
   const purchase = { customer: null, shipping: null, addons: [], shippingMethod: 'free' };
+  let paymentPollTimer = null;
 
   const extrasStyle = document.createElement('style');
   extrasStyle.id = 'checkout-extras-style';
@@ -465,7 +466,8 @@
       <label class="block"><span class="block text-[13px] font-medium text-neutral-800 mb-1.5">Pix copia e cola</span><textarea data-pix-code readonly rows="3" style="width:100%;box-sizing:border-box;resize:none;border:1px solid rgb(229 229 229);border-radius:12px;padding:11px 12px;background:rgb(250 250 250);color:rgb(64 64 64);font:500 11px/1.45 ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere"></textarea></label>
       <button class="tt-btn" type="button" data-copy-pix>COPIAR CÓDIGO PIX</button>
       <p data-pix-copy-status role="status" aria-live="polite" style="min-height:17px;margin:0;text-align:center;font-size:11px;color:rgb(5 150 105)"></p>
-      <p style="margin:0;text-align:center;font-size:11px;line-height:1.5;color:rgb(115 115 115)">Pedido #${escapeHtml(payment.orderId)} · Aguardando confirmação do pagamento.</p>
+      <p data-payment-status role="status" aria-live="polite" style="margin:0;text-align:center;font-size:12px;line-height:1.5;color:rgb(115 115 115);font-weight:700">Aguardando pagamento...</p>
+      <p style="margin:0;text-align:center;font-size:10px;line-height:1.5;color:rgb(163 163 163)">Pedido #${escapeHtml(payment.orderId)}</p>
     </div>`;
     const qrImage = formSection.querySelector('[data-pix-qr]');
     const pixCode = formSection.querySelector('[data-pix-code]');
@@ -487,6 +489,30 @@
     resetMessage();
     checkoutButton = formSection.querySelector('[data-copy-pix]');
     setStep(3);
+    if (payment.statusToken) {
+      clearInterval(paymentPollTimer);
+      const checkStatus = async () => {
+        if (document.hidden) return;
+        try {
+          const result = await api.primecashRequest(`/payment-status?orderId=${encodeURIComponent(payment.orderId)}&token=${encodeURIComponent(payment.statusToken)}`);
+          const status = formSection.querySelector('[data-payment-status]');
+          if (!status) return clearInterval(paymentPollTimer);
+          if (result.status === 'paid') {
+            clearInterval(paymentPollTimer);
+            status.textContent = 'Pagamento confirmado';
+            status.style.color = 'rgb(5 150 105)';
+            const copyButton = formSection.querySelector('[data-copy-pix]');
+            if (copyButton) { copyButton.disabled = true; copyButton.textContent = 'PAGAMENTO CONFIRMADO'; }
+          } else if (result.status === 'cancelled') {
+            clearInterval(paymentPollTimer);
+            status.textContent = 'Pagamento não concluído';
+            status.style.color = 'rgb(225 29 72)';
+          }
+        } catch { /* Mantém o estado atual e tenta novamente sem interromper o cliente. */ }
+      };
+      checkStatus();
+      paymentPollTimer = setInterval(checkStatus, 4000);
+    }
   };
 
   const renderPayment = () => {

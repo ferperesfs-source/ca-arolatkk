@@ -73,10 +73,11 @@
   };
   const statusInfo = {
     paid: ['Pago', 'paid'], fulfilled: ['Enviado', 'paid'], processing: ['Processando', 'processing'],
-    pending: ['Aguardando', 'waiting'], cancelled: ['Cancelado', 'waiting']
+    pending: ['Aguardando pagamento', 'waiting'], cancelled: ['Cancelado', 'waiting']
   };
 
   let cachedOrders = [];
+  let cachedEvents = [];
   let cachedCustomers = [];
   let selectedGateway = 'primecash';
   let gatewaySettings = {};
@@ -95,6 +96,13 @@
       auth: 'Bearer Token com API Key protegida', keyLabel: 'API Key', placeholder: 'Cole a chave de pagamentos da Titans',
       help: 'Use a chave de pagamentos em Financeiro → Integrações. Não use a chave de saque ou tokenização.', docs: 'https://app.titansgateway.net/docs/introduction/start',
       description: 'Pagamentos Pix criados pela API oficial, com código copia e cola exibido diretamente no checkout e status atualizado por webhook.'
+    },
+    manual_pix: {
+      name: 'Pix Manual', shortName: 'Pix Manual', logo: 'assets/gateways/pix-manual.svg',
+      auth: 'Dados de recebimento protegidos', keyLabel: 'Chave Pix', placeholder: 'Informe a chave Pix',
+      help: 'Configure a chave e os dados do titular que receberá os pagamentos.', docs: '',
+      description: 'Gera o Pix Copia e Cola e o QR Code com o valor exato do pedido, sem depender de uma API externa.',
+      eyebrow: 'PIX DIRETO', payment: 'Pix BR Code gerado no servidor'
     }
   };
 
@@ -129,7 +137,7 @@
   const renderOrders = (orders) => {
     const body = document.querySelector('#orders-body');
     if (!orders.length) {
-      body.innerHTML = '<tr><td colspan="6" class="table-empty">Nenhum pedido real registrado ainda.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="table-empty">Nenhum pedido real registrado ainda.</td></tr>';
       document.querySelector('.orders-panel .table-footer span').textContent = 'Nenhum pedido registrado';
       return;
     }
@@ -137,7 +145,12 @@
       const initials = order.customer_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
       const product = [...(order.items || []), ...(order.addons || [])].map((item) => `${item.variant_name || item.title} ×${item.quantity}`).join(', ');
       const [label, className] = statusInfo[order.status] || [order.status, 'waiting'];
-      return `<tr data-status="${escapeHtml(label)}"><td><strong>#CLX-${String(order.id).padStart(4, '0')}</strong></td><td><span class="customer"><i>${escapeHtml(initials)}</i><span>${escapeHtml(order.customer_name)}<small>${escapeHtml(order.customer_email)}</small></span></span></td><td>${escapeHtml(product)}</td><td><strong>${money(order.amount)}</strong></td><td><span class="status ${className}">${escapeHtml(label)}</span></td><td>${dateTime(order.created_at)}</td></tr>`;
+      const paymentName = order.gateway === 'manual_pix' ? 'Pix Manual' : order.gateway === 'titans' ? 'Titans' : order.gateway === 'primecash' ? 'PrimeCash' : 'Pix';
+      const payment = `<span class="order-payment"><strong>${escapeHtml(paymentName)}</strong>${order.pix_txid ? `<code>${escapeHtml(order.pix_txid)}</code>` : ''}</span>`;
+      const action = order.gateway === 'manual_pix' && order.status === 'pending'
+        ? `<button class="order-confirm-button" type="button" data-confirm-order="${order.id}">Confirmar pagamento</button>`
+        : '<span aria-hidden="true">—</span>';
+      return `<tr data-status="${escapeHtml(label)}"><td><strong>#CLX-${String(order.id).padStart(4, '0')}</strong></td><td><span class="customer"><i>${escapeHtml(initials)}</i><span>${escapeHtml(order.customer_name)}<small>${escapeHtml(order.customer_email)}</small></span></span></td><td>${escapeHtml(product)}</td><td><strong>${money(order.amount)}</strong></td><td>${payment}</td><td><span class="status ${className}">${escapeHtml(label)}</span></td><td>${dateTime(order.created_at)}</td><td>${action}</td></tr>`;
     }).join('');
     document.querySelector('.orders-panel .table-footer span').textContent = `Exibindo ${orders.length} pedido${orders.length === 1 ? '' : 's'}`;
     const confirmedRevenue = orders.filter((order) => ['paid', 'fulfilled'].includes(order.status)).reduce((sum, order) => sum + Number(order.amount || 0), 0);
@@ -289,16 +302,23 @@
     const toggle = document.querySelector('[data-gateway-toggle]');
     const notice = document.querySelector('[data-gateway-notice]');
     const healthy = active && configured;
+    const manual = provider === 'manual_pix';
     document.querySelector('[data-gateway-logo]').src = meta.logo;
     document.querySelector('[data-gateway-logo]').alt = meta.shortName;
     document.querySelector('[data-gateway-title]').textContent = meta.name;
     document.querySelector('[data-gateway-description]').textContent = meta.description;
     document.querySelector('[data-gateway-name]').textContent = meta.shortName;
     document.querySelector('[data-gateway-auth]').textContent = meta.auth;
-    document.querySelector('[data-gateway-key-label]').textContent = meta.keyLabel;
-    document.querySelector('[data-gateway-key-help]').textContent = meta.help;
-    document.querySelector('#gateway-secret-key').placeholder = meta.placeholder;
-    document.querySelector('[data-gateway-docs]').href = meta.docs;
+    document.querySelector('[data-gateway-eyebrow]').textContent = meta.eyebrow || 'PIX VIA API';
+    document.querySelector('[data-gateway-payment]').textContent = meta.payment || 'Pix com QR Code no checkout';
+    document.querySelector('[data-api-credentials]').hidden = manual;
+    document.querySelector('[data-manual-pix-settings]').hidden = !manual;
+    if (!manual) {
+      document.querySelector('[data-gateway-key-label]').textContent = meta.keyLabel;
+      document.querySelector('[data-gateway-key-help]').textContent = meta.help;
+      document.querySelector('#gateway-secret-key').placeholder = meta.placeholder;
+      document.querySelector('[data-gateway-docs]').href = meta.docs;
+    }
     document.querySelector('[data-titans-webhook-field]').hidden = provider !== 'titans';
     if (toggle) { toggle.checked = active; toggle.disabled = false; }
     if (state) {
@@ -306,13 +326,22 @@
       state.innerHTML = `<i></i> ${healthy ? 'Ativo' : active ? 'Requer configuração' : 'Inativo'}`;
     }
     document.querySelector('[data-gateway-health]').textContent = healthy ? 'Operacional' : active ? 'Configuração pendente' : 'Desativado';
-    document.querySelector('[data-gateway-credentials]').textContent = configured ? 'Protegida no Supabase Vault' : 'Não configuradas';
+    document.querySelector('[data-gateway-credentials]').textContent = configured ? (manual ? 'Dados cadastrados' : 'Protegida no Supabase Vault') : 'Não configuradas';
     notice.className = `gateway-notice ${healthy ? 'is-success' : active ? 'is-error' : ''}`;
     notice.textContent = healthy
       ? `${meta.shortName} está ativa. O checkout já pode criar pagamentos reais.`
       : active
-        ? `Cadastre a ${meta.keyLabel} abaixo para liberar o checkout.`
+        ? `Cadastre ${manual ? 'os dados de recebimento' : `a ${meta.keyLabel}`} abaixo para liberar o checkout.`
         : 'Ative este gateway para usá-lo nas novas compras.';
+    if (manual) {
+      const form = document.querySelector('[data-manual-pix-form]');
+      if (form && document.activeElement?.form !== form) {
+        form.elements.keyType.value = health.keyType || '';
+        form.elements.key.value = health.key || '';
+        form.elements.receiverName.value = health.receiverName || '';
+        form.elements.receiverCity.value = health.receiverCity || '';
+      }
+    }
     document.querySelectorAll('[data-gateway-provider]').forEach((button) => {
       const key = button.dataset.gatewayProvider;
       const keySettings = gatewaySettings[key] || {};
@@ -329,6 +358,7 @@
 
   const loadGatewayHealth = async (session, provider) => {
     try {
+      if (provider === 'manual_pix') return await api.primecashRequest('/manual-pix', {}, session.access_token);
       return await api.primecashRequest(`/status?provider=${encodeURIComponent(provider)}`, {}, session.access_token);
     } catch { return { configured: false }; }
   };
@@ -399,13 +429,14 @@
     try {
       const membership = await api.request(`/rest/v1/admin_users?user_id=eq.${encodeURIComponent(session.user.id)}&select=display_name,email`, {}, session.access_token);
       if (!membership?.length) throw new Error('Acesso administrativo não autorizado.');
-      const [orders, products, events, gatewayRows, primecashHealth, titansHealth, trackingResponse, pushcutResponse] = await Promise.all([
-        api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,addons,shipping_method,shipping_amount,quantity,amount,status,created_at&order=created_at.desc&limit=500', {}, session.access_token),
+      const [orders, products, events, gatewayRows, primecashHealth, titansHealth, manualPixHealth, trackingResponse, pushcutResponse] = await Promise.all([
+        api.request('/rest/v1/orders?select=id,customer_name,customer_email,items,addons,shipping_method,shipping_amount,quantity,amount,status,gateway,pix_txid,paid_at,created_at&order=created_at.desc&limit=500', {}, session.access_token),
         api.request('/rest/v1/products?select=id,title,variant_name,price,image_url,stock_quantity,active&active=eq.true&order=sort_order.asc', {}, session.access_token),
         api.request('/rest/v1/tracking_events?select=session_id,event_name,created_at&order=created_at.desc&limit=5000', {}, session.access_token),
         api.request('/rest/v1/gateway_settings?select=provider,active,updated_at&order=provider.asc', {}, session.access_token),
         loadGatewayHealth(session, 'primecash'),
         loadGatewayHealth(session, 'titans'),
+        loadGatewayHealth(session, 'manual_pix'),
         api.primecashRequest('/tracking', {}, session.access_token).catch(() => ({ integrations: [] })),
         api.primecashRequest('/pushcut', {}, session.access_token).catch(() => ({ endpoints: [] }))
       ]);
@@ -416,9 +447,10 @@
       document.querySelector('#overview-heading').textContent = `Olá, ${displayName.split(' ')[0]}`;
       document.querySelector('[data-view="overview"] .eyebrow').textContent = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date()).toLocaleUpperCase('pt-BR');
       cachedOrders = orders;
+      cachedEvents = events;
       renderOrders(orders); renderProducts(products); renderCustomers(orders); renderActivity(orders); renderMetrics(orders, events);
       gatewaySettings = Object.fromEntries(gatewayRows.map((row) => [row.provider, row]));
-      gatewayHealth = { primecash: primecashHealth, titans: titansHealth };
+      gatewayHealth = { primecash: primecashHealth, titans: titansHealth, manual_pix: manualPixHealth };
       selectedGateway = gatewayRows.find((row) => row.active)?.provider || 'primecash';
       renderGateway();
       trackingIntegrations = trackingResponse.integrations || [];
@@ -484,11 +516,15 @@
     if (!session) return location.replace('login.html');
     button.disabled = true;
     button.textContent = 'Testando...';
-    const health = await api.primecashRequest(`/status?provider=${encodeURIComponent(selectedGateway)}&probe=1`, {}, session.access_token).catch(() => ({ configured: false, reachable: false }));
+    const health = selectedGateway === 'manual_pix'
+      ? await loadGatewayHealth(session, 'manual_pix')
+      : await api.primecashRequest(`/status?provider=${encodeURIComponent(selectedGateway)}&probe=1`, {}, session.access_token).catch(() => ({ configured: false, reachable: false }));
     gatewayHealth[selectedGateway] = health;
     renderGateway();
     const meta = gatewayCatalog[selectedGateway];
-    showToast(health.reachable ? `Conexão com a ${meta.shortName} confirmada.` : health.configured ? 'Chave salva, mas a conexão não respondeu.' : `Cadastre a ${meta.keyLabel}.`);
+    showToast(selectedGateway === 'manual_pix'
+      ? (health.configured ? 'Os dados do Pix Manual estão completos e prontos para uso.' : 'Preencha todos os dados de recebimento.')
+      : health.reachable ? `Conexão com a ${meta.shortName} confirmada.` : health.configured ? 'Chave salva, mas a conexão não respondeu.' : `Cadastre a ${meta.keyLabel}.`);
     button.disabled = false;
     button.textContent = 'Testar conexão';
   });
@@ -537,6 +573,75 @@
     } finally {
       submit.disabled = false;
       submit.querySelector('span').textContent = 'Salvar chave';
+    }
+  });
+  document.querySelector('[data-manual-pix-form]')?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = form.querySelector('[type="submit"]');
+    const error = document.querySelector('[data-manual-pix-error]');
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    error.textContent = '';
+    form.querySelectorAll('[aria-invalid="true"]').forEach((field) => field.removeAttribute('aria-invalid'));
+    const payload = {
+      keyType: form.elements.keyType.value,
+      key: form.elements.key.value.trim(),
+      receiverName: form.elements.receiverName.value.trim(),
+      receiverCity: form.elements.receiverCity.value.trim()
+    };
+    const firstEmpty = ['keyType', 'key', 'receiverName', 'receiverCity'].find((name) => !payload[name]);
+    if (firstEmpty) {
+      const field = form.elements[firstEmpty];
+      field.setAttribute('aria-invalid', 'true');
+      error.textContent = 'Preencha todos os dados de recebimento.';
+      return field.focus();
+    }
+    submit.disabled = true;
+    submit.querySelector('span').textContent = 'Salvando...';
+    try {
+      const settings = await api.primecashRequest('/manual-pix', { method: 'PUT', body: JSON.stringify(payload) }, session.access_token);
+      gatewayHealth.manual_pix = { ...settings, reachable: true };
+      renderGateway();
+      showToast('Dados de recebimento do Pix Manual salvos.');
+    } catch (saveError) {
+      error.textContent = saveError.message;
+    } finally {
+      submit.disabled = false;
+      submit.querySelector('span').textContent = 'Salvar dados';
+    }
+  });
+
+  const confirmDialog = document.querySelector('[data-confirm-payment-dialog]');
+  let orderPendingConfirmation = null;
+  document.querySelector('#orders-body')?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-confirm-order]');
+    if (!button) return;
+    orderPendingConfirmation = cachedOrders.find((order) => String(order.id) === button.dataset.confirmOrder) || null;
+    if (!orderPendingConfirmation) return;
+    confirmDialog.querySelector('[data-confirm-payment-summary]').textContent = `Pedido #CLX-${String(orderPendingConfirmation.id).padStart(4, '0')}\nValor: ${money(orderPendingConfirmation.amount)}`;
+    confirmDialog.showModal();
+  });
+  document.querySelector('[data-confirm-payment-submit]')?.addEventListener('click', async (event) => {
+    if (!orderPendingConfirmation) return;
+    const button = event.currentTarget;
+    const session = await api.validSession();
+    if (!session) return location.replace('login.html');
+    button.disabled = true;
+    button.querySelector('span').textContent = 'Confirmando...';
+    try {
+      const result = await api.primecashRequest('/confirm-payment', { method: 'POST', body: JSON.stringify({ orderId: orderPendingConfirmation.id }) }, session.access_token);
+      const order = cachedOrders.find((item) => item.id === orderPendingConfirmation.id);
+      if (order) { order.status = 'paid'; order.paid_at = result.paidAt || order.paid_at; }
+      renderOrders(cachedOrders); renderCustomers(cachedOrders); renderActivity(cachedOrders); renderMetrics(cachedOrders, cachedEvents);
+      confirmDialog.close();
+      showToast('Pagamento confirmado com sucesso.');
+      orderPendingConfirmation = null;
+    } catch (confirmError) {
+      showToast(confirmError.message);
+    } finally {
+      button.disabled = false;
+      button.querySelector('span').textContent = 'Confirmar pagamento';
     }
   });
   document.querySelector('[data-tracking-provider]')?.addEventListener('change', updateTrackingFields);

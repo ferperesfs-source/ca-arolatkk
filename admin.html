@@ -86,8 +86,8 @@
             <article><span>Receita confirmada</span><strong data-orders-revenue>R$ 0,00</strong></article>
           </section>
           <section class="panel orders-panel">
-            <header class="panel-header orders-header"><div><h3>Todos os pedidos</h3><p>Dados registrados no checkout da loja</p></div><div class="order-tools"><label><span class="sr-only">Filtrar pedidos</span><input id="order-search" type="search" placeholder="Buscar pedido ou cliente..."></label><select id="status-filter" aria-label="Filtrar por status"><option value="">Todos os status</option><option>Pago</option><option>Processando</option><option>Aguardando</option><option>Cancelado</option></select></div></header>
-            <div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Produto</th><th>Total</th><th>Status</th><th>Horário</th></tr></thead><tbody id="orders-body"><tr><td colspan="6" class="table-empty">Carregando pedidos...</td></tr></tbody></table></div>
+            <header class="panel-header orders-header"><div><h3>Todos os pedidos</h3><p>Dados registrados no checkout da loja</p></div><div class="order-tools"><label><span class="sr-only">Filtrar pedidos</span><input id="order-search" type="search" placeholder="Buscar pedido ou cliente..."></label><select id="status-filter" aria-label="Filtrar por status"><option value="">Todos os status</option><option>Pago</option><option>Processando</option><option value="Aguardando pagamento">Aguardando pagamento</option><option>Cancelado</option></select></div></header>
+            <div class="table-wrap"><table><thead><tr><th>Pedido</th><th>Cliente</th><th>Produto</th><th>Total</th><th>Pagamento</th><th>Status</th><th>Horário</th><th>Ação</th></tr></thead><tbody id="orders-body"><tr><td colspan="8" class="table-empty">Carregando pedidos...</td></tr></tbody></table></div>
             <footer class="table-footer"><span>Carregando pedidos...</span><button type="button" data-more-orders>Atualizar lista <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"></path><path d="M20 4v7h-7"></path></svg></button></footer>
           </section>
         </section>
@@ -131,6 +131,10 @@
               <span class="gateway-provider-logo"><img src="assets/gateways/titans-logo.avif" alt=""></span>
               <span><strong>Titans Gateway</strong><small data-provider-state="titans">Verificando...</small></span><i aria-hidden="true"></i>
             </button>
+            <button class="gateway-provider-option" type="button" role="tab" aria-selected="false" data-gateway-provider="manual_pix">
+              <span class="gateway-provider-logo"><img src="assets/gateways/pix-manual.svg" alt=""></span>
+              <span><strong>Pix Manual</strong><small data-provider-state="manual_pix">Verificando...</small></span><i aria-hidden="true"></i>
+            </button>
           </div>
           <article class="panel gateway-card gateway-card-unified" data-gateway-card>
             <header class="gateway-card-head">
@@ -138,7 +142,7 @@
               <span class="gateway-state is-checking" data-gateway-state><i></i> Verificando</span>
             </header>
             <div class="gateway-card-copy">
-              <span class="eyebrow">PIX VIA API</span>
+              <span class="eyebrow" data-gateway-eyebrow>PIX VIA API</span>
               <h3 data-gateway-title>PrimeCash Brasil</h3>
               <p data-gateway-description>Os dados do pedido são validados no servidor e enviados para gerar o QR Code Pix diretamente no checkout.</p>
             </div>
@@ -149,7 +153,7 @@
             </section>
             <dl class="gateway-details">
               <div><dt>Autenticação</dt><dd data-gateway-auth>Basic Auth com chave protegida</dd></div>
-              <div><dt>Pagamento</dt><dd>Pix com QR Code no checkout</dd></div>
+              <div><dt>Pagamento</dt><dd data-gateway-payment>Pix com QR Code no checkout</dd></div>
               <div><dt>Credenciais</dt><dd data-gateway-credentials>Verificando...</dd></div>
             </dl>
             <footer class="gateway-actions">
@@ -157,7 +161,7 @@
               <button class="secondary-button" type="button" data-test-gateway>Testar conexão</button>
             </footer>
             <p class="gateway-notice" data-gateway-notice>Consultando a configuração segura...</p>
-            <section class="gateway-credentials">
+            <section class="gateway-credentials" data-api-credentials>
               <div class="gateway-credentials-copy">
                 <span class="metric-icon amber"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></span>
                 <div><h4>Credenciais</h4><p>A chave é validada pela API e armazenada criptografada. Depois de salva, nunca é exibida novamente.</p></div>
@@ -178,6 +182,25 @@
                 <div class="gateway-key-actions"><button class="primary-button gateway-save-key" type="submit"><span>Salvar chave</span></button><a href="https://primecashbrasil.readme.io/reference/introducao" target="_blank" rel="noopener noreferrer" data-gateway-docs>Documentação oficial</a></div>
               </form>
               <div class="gateway-security-note"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span>Protegida pelo Supabase Vault</span></div>
+            </section>
+            <section class="gateway-credentials manual-pix-settings" data-manual-pix-settings hidden>
+              <div class="gateway-credentials-copy">
+                <span class="metric-icon green"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2v20M5 7h10.5a3.5 3.5 0 0 1 0 7H8.5a3.5 3.5 0 0 0 0 7H19"></path></svg></span>
+                <div><h4>Dados de recebimento</h4><p>Estas informações ficam visíveis somente para administradores e podem ser atualizadas quando a conta de recebimento mudar.</p></div>
+              </div>
+              <form class="gateway-key-form manual-pix-form" data-manual-pix-form novalidate>
+                <label for="manual-pix-key-type">Tipo da chave <span>obrigatório</span></label>
+                <div class="gateway-key-input gateway-select-input"><select id="manual-pix-key-type" name="keyType" required><option value="">Selecione</option><option value="random">Chave aleatória</option><option value="cpf">CPF</option><option value="cnpj">CNPJ</option><option value="phone">Telefone</option><option value="email">E-mail</option></select></div>
+                <label for="manual-pix-key">Chave Pix <span>obrigatória</span></label>
+                <div class="gateway-key-input"><input id="manual-pix-key" name="key" type="text" maxlength="77" autocomplete="off" spellcheck="false" placeholder="Informe a chave Pix" required></div>
+                <div class="manual-pix-grid">
+                  <label><span>Nome do recebedor <b>obrigatório</b></span><div class="gateway-key-input"><input name="receiverName" type="text" minlength="2" maxlength="25" autocomplete="name" placeholder="Nome cadastrado na conta" required></div><small>Máximo de 25 caracteres no padrão Pix.</small></label>
+                  <label><span>Cidade do recebedor <b>obrigatório</b></span><div class="gateway-key-input"><input name="receiverCity" type="text" minlength="2" maxlength="15" autocomplete="address-level2" placeholder="Ex.: SAO PAULO" required></div><small>Máximo de 15 caracteres no padrão Pix.</small></label>
+                </div>
+                <span class="gateway-key-error" data-manual-pix-error role="alert"></span>
+                <div class="gateway-key-actions"><button class="primary-button gateway-save-key" type="submit"><span>Salvar dados</span></button></div>
+              </form>
+              <div class="gateway-security-note"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path><path d="m9 12 2 2 4-4"></path></svg><span>Dados protegidos pelo acesso administrativo</span></div>
             </section>
           </article>
         </section>
@@ -239,7 +262,15 @@
     </div>
   </div>
   <div class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
-  <script src="supabase-config.js?v=6"></script>
-  <script src="admin.js?v=10"></script>
+  <dialog class="confirm-dialog" data-confirm-payment-dialog aria-labelledby="confirm-payment-title">
+    <form method="dialog">
+      <span class="metric-icon green"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg></span>
+      <h2 id="confirm-payment-title">Confirmar o recebimento deste pagamento?</h2>
+      <p data-confirm-payment-summary></p>
+      <div><button class="secondary-button" value="cancel">Cancelar</button><button class="primary-button" type="button" data-confirm-payment-submit><span>Confirmar pagamento</span></button></div>
+    </form>
+  </dialog>
+  <script src="supabase-config.js?v=7"></script>
+  <script src="admin.js?v=11"></script>
 </body>
 </html>

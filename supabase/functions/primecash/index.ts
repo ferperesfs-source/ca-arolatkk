@@ -1,12 +1,14 @@
 import { createClient } from "npm:@supabase/supabase-js@2.95.0";
 import QRCode from "npm:qrcode@1.5.4";
 
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void };
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 const PRIMECASH_URL = "https://api.primecashbrasil.com/v1";
 const TITANS_URL = "https://api.titansgateway.net";
 const FUNCTION_URL = `${SUPABASE_URL}/functions/v1/primecash`;
-type Provider = "primecash" | "titans";
+type Provider = "primecash" | "titans" | "manual_pix";
 type MarketingProvider = "google" | "meta" | "tiktok";
 type MarketingIntegration = { id: string; provider: MarketingProvider; name: string; tracking_id: string; active: boolean };
 type PushcutEvent = "order_created" | "order_paid";
@@ -43,18 +45,23 @@ const requireAdmin = async (req: Request) => {
 };
 
 const providerSecret = async (provider: Provider) => {
+  if (provider === "manual_pix") return null;
   const { data, error } = await supabase.rpc(provider === "titans" ? "get_titans_secret" : "get_primecash_secret");
   if (error) throw error;
   return typeof data === "string" && data.length ? data : null;
 };
 
 const providerHasSecret = async (provider: Provider) => {
+  if (provider === "manual_pix") return false;
   const { data, error } = await supabase.rpc(provider === "titans" ? "has_titans_secret" : "has_primecash_secret");
   if (error) throw error;
   return Boolean(data);
 };
 
-const providerFromUrl = (url: URL): Provider => url.searchParams.get("provider") === "titans" ? "titans" : "primecash";
+const providerFromUrl = (url: URL): Provider => {
+  const provider = url.searchParams.get("provider");
+  return provider === "titans" || provider === "manual_pix" ? provider : "primecash";
+};
 
 const basicAuthorization = (secret: string) => `Basic ${btoa(`${secret}:x`)}`;
 
@@ -129,6 +136,59 @@ const probeTitansSecret = async (secret: string): Promise<SecretProbe> => {
 const probeProviderSecret = (provider: Provider, secret: string) => provider === "titans" ? probeTitansSecret(secret) : probeSecret(secret);
 
 const productId = (value: unknown) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 80);
+
+const pixText = (value: unknown, maxLength: number) => String(value || "")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase()
+  .replace(/[^A-Z0-9 $%*+\-./:]/g, "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+
+const emv = (id: string, value: string) => `${id}${String(new TextEncoder().encode(value).length).padStart(2, "0")}${value}`;
+
+const crc16 = (value: string) => {
+  let crc = 0xffff;
+  for (const byte of new TextEncoder().encode(value)) {
+    crc ^= byte << 8;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc & 0x8000) ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+  }
+  return crc.toString(16).toUpperCase().padStart(4, "0");
+};
+
+const validPixKey = (type: string, rawKey: string) => {
+  const key = rawKey.trim();
+  const digits = key.replace(/\D/g, "");
+  if (type === "cpf") {
+    if (!/^\d{11}$/.test(digits) || /^(\d)\1+$/.test(digits)) return false;
+    const check = (length: number) => {
+      const sum = digits.slice(0, length).split("").reduce((total, digit, index) => total + Number(digit) * (length + 1 - index), 0);
+      const remainder = (sum * 10) % 11;
+      return remainder === 10 ? 0 : remainder;
+    };
+    return check(9) === Number(digits[9]) && check(10) === Number(digits[10]);
+  }
+  if (type === "cnpj") {
+    if (!/^\d{14}$/.test(digits) || /^(\d)\1+$/.test(digits)) return false;
+    const check = (length: number) => {
+      const weights = length === 12 ? [5,4,3,2,9,8,7,6,5,4,3,2] : [6,5,4,3,2,9,8,7,6,5,4,3,2];
+      const remainder = digits.slice(0, length).split("").reduce((total, digit, index) => total + Number(digit) * weights[index], 0) % 11;
+      return remainder < 2 ? 0 : 11 - remainder;
+    };
+    return check(12) === Number(digits[12]) && check(13) === Number(digits[13]);
+  }
+  if (type === "phone") return /^\+\d{10,15}$/.test(key);
+  if (type === "email") return /^\S+@\S+\.\S+$/.test(key) && key.length <= 77;
+  if (type === "random") return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(key);
+  return false;
+};
+
+const normalizedPixKey = (type: string, value: string) => type === "cpf" || type === "cnpj" ? value.replace(/\D/g, "") : value.trim();
+
+const buildPixPayload = (key: string, receiverName: string, receiverCity: string, amount: number, txid: string) => {
+  const merchantAccount = emv("00", "BR.GOV.BCB.PIX") + emv("01", key);
+  const additionalData = emv("05", txid);
+  const payload = emv("00", "01") + emv("26", merchantAccount) + emv("52", "0000") + emv("53", "986")
+    + emv("54", amount.toFixed(2)) + emv("58", "BR") + emv("59", pixText(receiverName, 25))
+    + emv("60", pixText(receiverCity, 15)) + emv("62", additionalData) + "6304";
+  return payload + crc16(payload);
+};
 
 const statusMap: Record<string, string> = {
   paid: "paid", authorized: "processing", processing: "processing", pending: "pending", waiting_payment: "pending",
@@ -465,11 +525,96 @@ const dispatchPaidOrder = async (orderId: number) => {
   }));
 };
 
+const manualPixConfig = async () => {
+  const { data, error } = await supabase.from("gateway_settings")
+    .select("provider,active,pix_key,pix_key_type,pix_receiver_name,pix_receiver_city,updated_at")
+    .eq("provider", "manual_pix").maybeSingle();
+  if (error) throw error;
+  return data;
+};
+
+const manualPixConfigured = (settings: any) => Boolean(
+  settings?.pix_key && settings?.pix_key_type && settings?.pix_receiver_name && settings?.pix_receiver_city
+  && validPixKey(settings.pix_key_type, settings.pix_key)
+  && pixText(settings.pix_receiver_name, 25).length >= 2
+  && pixText(settings.pix_receiver_city, 15).length >= 2
+);
+
+const handleManualPix = async (req: Request) => {
+  await requireAdmin(req);
+  if (req.method === "GET") {
+    const settings = await manualPixConfig();
+    return json({
+      configured: manualPixConfigured(settings),
+      active: Boolean(settings?.active),
+      key: settings?.pix_key || "",
+      keyType: settings?.pix_key_type || "",
+      receiverName: settings?.pix_receiver_name || "",
+      receiverCity: settings?.pix_receiver_city || "",
+      updatedAt: settings?.updated_at || null,
+    });
+  }
+  if (req.method !== "PUT") return json({ error: "Método não permitido." }, 405);
+  const body = await parseJson(req) as any;
+  const keyType = String(body.keyType || "").trim();
+  const key = normalizedPixKey(keyType, String(body.key || ""));
+  const receiverName = pixText(body.receiverName, 25);
+  const receiverCity = pixText(body.receiverCity, 15);
+  if (!validPixKey(keyType, key)) return json({ error: "Informe uma chave Pix válida para o tipo selecionado." }, 400);
+  if (receiverName.length < 2) return json({ error: "Informe o nome do recebedor com pelo menos 2 caracteres." }, 400);
+  if (receiverCity.length < 2) return json({ error: "Informe a cidade do recebedor com pelo menos 2 caracteres." }, 400);
+  const { data, error } = await supabase.from("gateway_settings").update({
+    pix_key: key, pix_key_type: keyType, pix_receiver_name: receiverName, pix_receiver_city: receiverCity,
+    updated_at: new Date().toISOString(),
+  }).eq("provider", "manual_pix").select("active,updated_at").single();
+  if (error) throw error;
+  return json({ configured: true, active: Boolean(data.active), key, keyType, receiverName, receiverCity, updatedAt: data.updated_at });
+};
+
+const handlePaymentStatus = async (req: Request, url: URL) => {
+  if (req.method !== "GET") return json({ error: "Método não permitido." }, 405);
+  const orderId = Number.parseInt(url.searchParams.get("orderId") || "", 10);
+  const token = url.searchParams.get("token") || "";
+  if (!Number.isSafeInteger(orderId) || orderId < 1 || !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(token)) return json({ error: "Pedido inválido." }, 400);
+  const { data, error } = await supabase.from("orders").select("id,status").eq("id", orderId).eq("payment_reference", token).maybeSingle();
+  if (error) throw error;
+  if (!data) return json({ error: "Pedido não encontrado." }, 404);
+  return json({ orderId: data.id, status: data.status === "paid" || data.status === "fulfilled" ? "paid" : data.status === "cancelled" ? "cancelled" : "awaiting_payment" });
+};
+
+const handleConfirmPayment = async (req: Request) => {
+  const admin = await requireAdmin(req);
+  if (req.method !== "POST") return json({ error: "Método não permitido." }, 405);
+  const body = await parseJson(req) as any;
+  const orderId = Number.parseInt(String(body.orderId || ""), 10);
+  if (!Number.isSafeInteger(orderId) || orderId < 1) return json({ error: "Pedido inválido." }, 400);
+  const { data: current, error: currentError } = await supabase.from("orders")
+    .select("id,status,gateway,amount").eq("id", orderId).maybeSingle();
+  if (currentError) throw currentError;
+  if (!current) return json({ error: "Pedido não encontrado." }, 404);
+  if (current.gateway !== "manual_pix") return json({ error: "Somente pedidos do Pix Manual podem ser confirmados por esta ação." }, 409);
+  if (current.status === "paid" || current.status === "fulfilled") return json({ orderId, status: current.status, paidAt: null, alreadyConfirmed: true });
+  if (current.status !== "pending") return json({ error: "Este pedido não está aguardando pagamento." }, 409);
+  const paidAt = new Date().toISOString();
+  const { data: updated, error } = await supabase.from("orders").update({
+    status: "paid", gateway_status: "paid", paid_at: paidAt, confirmed_by: admin.id, updated_at: paidAt,
+  }).eq("id", orderId).eq("status", "pending").eq("gateway", "manual_pix").select("id,status,paid_at").maybeSingle();
+  if (error) throw error;
+  if (!updated) return json({ error: "O pedido foi atualizado em outra sessão. Recarregue a lista." }, 409);
+  EdgeRuntime.waitUntil(Promise.allSettled([dispatchPaidOrder(orderId), dispatchPushcutEvent(orderId, "order_paid")]));
+  return json({ orderId, status: "paid", paidAt: updated.paid_at });
+};
+
 const handleStatus = async (req: Request, url: URL) => {
   await requireAdmin(req);
   const provider = providerFromUrl(url);
   const { data: settings, error } = await supabase.from("gateway_settings").select("active").eq("provider", provider).maybeSingle();
   if (error) throw error;
+  if (provider === "manual_pix") {
+    const manualSettings = await manualPixConfig();
+    const configured = manualPixConfigured(manualSettings);
+    return json({ provider, active: Boolean(manualSettings?.active), configured, reachable: configured });
+  }
   const configured = await providerHasSecret(provider);
   let reachable = false;
   if (configured && url.searchParams.get("probe") === "1") {
@@ -483,6 +628,7 @@ const handleCredentials = async (req: Request, url: URL) => {
   await requireAdmin(req);
   if (req.method !== "PUT") return json({ error: "Método não permitido." }, 405);
   const provider = providerFromUrl(url);
+  if (provider === "manual_pix") return json({ error: "Use a configuração própria do Pix Manual." }, 400);
   const body = await parseJson(req) as { secretKey?: unknown; webhookSecret?: unknown };
   const secretKey = String(body.secretKey || "").trim();
   const webhookSecret = String(body.webhookSecret || "").trim();
@@ -541,29 +687,45 @@ const handleCheckout = async (req: Request) => {
   if (!items.length || items.some((item: any) => !item.product_id || item.quantity < 1)) return json({ error: "O carrinho contém itens inválidos." }, 400);
   if (addons.some((id: string) => !id) || new Set(addons).size !== addons.length || !shippingMethod) return json({ error: "Revise as ofertas e a forma de entrega." }, 400);
 
-  const { data: settings, error: settingsError } = await supabase.from("gateway_settings").select("provider,active").eq("active", true).maybeSingle();
+  const { data: settings, error: settingsError } = await supabase.from("gateway_settings")
+    .select("provider,active,pix_key,pix_key_type,pix_receiver_name,pix_receiver_city").eq("active", true).maybeSingle();
   if (settingsError) throw settingsError;
-  if (!settings?.active || !["primecash", "titans"].includes(settings.provider)) return json({ error: "O gateway de pagamento está desativado." }, 503);
+  if (!settings?.active || !["primecash", "titans", "manual_pix"].includes(settings.provider)) return json({ error: "O gateway de pagamento está desativado." }, 503);
   const provider = settings.provider as Provider;
-  const secret = await providerSecret(provider);
-  if (!secret) return json({ error: "O gateway ainda não foi configurado pelo administrador." }, 503);
+  const secret = provider === "manual_pix" ? null : await providerSecret(provider);
+  if (provider === "manual_pix" && !manualPixConfigured(settings)) return json({ error: "O Pix ainda não foi configurado." }, 503);
+  if (provider !== "manual_pix" && !secret) return json({ error: "O gateway ainda não foi configurado pelo administrador." }, 503);
 
   const reference = crypto.randomUUID();
+  const pixTxid = provider === "manual_pix" ? `CLX${crypto.randomUUID().replace(/-/g, "").slice(0, 22).toUpperCase()}` : null;
   const { data: order, error: orderError } = await supabase.from("orders").insert({
     customer_name: name, customer_email: email, phone, customer_tax_id: taxId, items,
     addons: addons.map((addonId: string) => ({ addon_id: addonId })), shipping_method: shippingMethod,
     shipping_address: [street, streetNumber, complement, neighborhood].filter(Boolean).join(", "),
     city: `${city} - ${state}`, postal_code: postalCode,
-    payment_reference: reference, gateway: provider, gateway_status: "creating",
-  }).select("id,payment_reference,amount,items,addons,shipping_amount,shipping_method").single();
+    payment_reference: reference, gateway: provider, gateway_checkout_id: pixTxid,
+    gateway_status: provider === "manual_pix" ? "pending" : "creating", pix_txid: pixTxid,
+  }).select("id,payment_reference,amount,items,addons,shipping_amount,shipping_method,pix_txid").single();
   if (orderError || !order) throw orderError || new Error("Não foi possível registrar o pedido.");
 
   try {
+    if (provider === "manual_pix") {
+      const pixCode = buildPixPayload(String(settings.pix_key), String(settings.pix_receiver_name), String(settings.pix_receiver_city), Number(order.amount), String(order.pix_txid));
+      const qrSvg = await QRCode.toString(pixCode, { type: "svg", errorCorrectionLevel: "M", margin: 1, width: 280 });
+      const qrCodeImage = `data:image/svg+xml;base64,${btoa(qrSvg)}`;
+      EdgeRuntime.waitUntil(dispatchPushcutEvent(Number(order.id), "order_created").catch((notificationError) => {
+        console.warn("PushCut order-created dispatch failed:", notificationError instanceof Error ? notificationError.message : notificationError);
+      }));
+      return json({
+        orderId: order.id, status: "awaiting_payment", pixCode, qrCodeImage, expiresAt: null,
+        amount: Number(order.amount), statusToken: reference,
+      });
+    }
     const amount = Math.round(Number(order.amount) * 100);
     const paymentItems = [...(order.items || []), ...(order.addons || [])];
     const shippingFee = Math.round(Number(order.shipping_amount || 0) * 100);
     const transaction = provider === "titans"
-      ? await titansRequest("/v1/payment", secret, {
+      ? await titansRequest("/v1/payment", secret!, {
           method: "POST",
           body: JSON.stringify({
             amount,
@@ -588,7 +750,7 @@ const handleCheckout = async (req: Request) => {
             },
           }),
         })
-      : await primecashRequest("/transactions", secret, {
+      : await primecashRequest("/transactions", secret!, {
           method: "POST",
           body: JSON.stringify({
             amount,
@@ -636,6 +798,7 @@ const handleCheckout = async (req: Request) => {
       qrCodeImage,
       expiresAt: provider === "primecash" ? transaction.pix?.expirationDate || null : null,
       amount: Number(order.amount),
+      statusToken: reference,
     });
   } catch (error) {
     await supabase.from("orders").update({ status: "cancelled", gateway_status: "creation_failed", updated_at: new Date().toISOString() }).eq("id", order.id);
@@ -693,6 +856,9 @@ Deno.serve(async (req) => {
   try {
     if (action === "status") return await handleStatus(req, url);
     if (action === "credentials") return await handleCredentials(req, url);
+    if (action === "manual-pix") return await handleManualPix(req);
+    if (action === "payment-status") return await handlePaymentStatus(req, url);
+    if (action === "confirm-payment") return await handleConfirmPayment(req);
     if (action === "tracking") return await handleTracking(req, url);
     if (action === "pushcut") return await handlePushcut(req, url);
     if (action === "checkout") return await handleCheckout(req);
