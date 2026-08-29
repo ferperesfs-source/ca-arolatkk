@@ -227,15 +227,13 @@
     const todayOrders = orders.filter((order) => new Date(order.created_at) >= today);
     const revenueToday = todayOrders.filter((order) => ['paid','fulfilled'].includes(order.status)).reduce((sum, order) => sum + Number(order.amount), 0);
     const customersToday = new Set(todayOrders.map((order) => order.customer_email)).size;
-    const visitorsToday = new Set(events.filter((event) => new Date(event.created_at) >= today && event.event_name === 'product_view').map((event) => event.session_id)).size;
-    const conversion = visitorsToday ? (todayOrders.length / visitorsToday) * 100 : 0;
+    const unpaidToday = todayOrders.filter((order) => order.status === 'pending').length;
     const values = document.querySelectorAll('[data-metric-value]');
     values[0].textContent = money(revenueToday);
     values[1].textContent = String(todayOrders.length);
     values[2].textContent = String(customersToday);
-    values[3].textContent = `${conversion.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
-    document.querySelector('[data-pending-count]').textContent = `${todayOrders.filter((order) => order.status === 'pending').length} aguardando pagamento`;
-    document.querySelector('[data-visits-count]').textContent = `${visitorsToday} visita${visitorsToday === 1 ? '' : 's'} hoje`;
+    values[3].textContent = String(unpaidToday);
+    document.querySelector('[data-pending-count]').textContent = `${unpaidToday} aguardando pagamento`;
     const dayValues = Array.from({ length: 7 }, (_, index) => {
       const day = new Date(today); day.setDate(day.getDate() - (6 - index));
       const next = new Date(day); next.setDate(next.getDate() + 1);
